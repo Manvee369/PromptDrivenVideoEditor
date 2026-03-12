@@ -1,6 +1,7 @@
 """Caption Agent — generates subtitles from transcript mapped to timeline.
 
 Phase 2: supports animated word-by-word TikTok-style captions.
+Finds transcript segments that overlap with selected clips (even partially).
 """
 
 from pathlib import Path
@@ -15,13 +16,13 @@ log = get_logger(__name__)
 STYLES = {
     "default": {
         "fontname": "Arial",
-        "fontsize_pct": 0.045,  # relative to height
-        "primary": "&H00FFFFFF",  # white
-        "outline": "&H00000000",  # black
+        "fontsize_pct": 0.045,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
         "bold": -1,
         "outline_width": 3,
         "shadow": 1,
-        "alignment": 2,  # bottom center
+        "alignment": 2,
         "margin_v_pct": 0.08,
     },
     "tiktok_bold": {
@@ -32,49 +33,94 @@ STYLES = {
         "bold": -1,
         "outline_width": 4,
         "shadow": 0,
-        "alignment": 5,  # center middle
+        "alignment": 5,
         "margin_v_pct": 0.02,
     },
 }
 
-# Words that get highlighted/emphasized
 HYPE_WORDS = {
     "amazing", "insane", "crazy", "fire", "best", "worst", "never", "always",
     "incredible", "unbelievable", "huge", "massive", "epic", "legendary",
     "wow", "omg", "no", "yes", "what", "how", "why", "stop", "go",
-    "win", "lose", "kill", "clutch", "perfect",
+    "win", "lose", "kill", "clutch", "perfect", "champion", "victory",
+    "overtake", "crash", "fastest", "record", "lead", "first", "last",
 }
 
 
 def generate_captions(
-    timeline: Timeline, signals: dict, storage: StorageManager
+    timeline: Timeline, signals: dict, storage: StorageManager,
+    min_clip_duration: float = 2.0,
+    min_overlap_ratio: float = 0.6,
 ) -> Timeline:
     """
-    Map transcript segments onto timeline clip boundaries.
-    Adjusts timestamps for removed silence gaps.
+    Find transcript segments that overlap with each clip in the timeline,
+    then map them to the output timeline position.
 
-    Returns Timeline with captions[] populated.
+    Filtering rules for clean, human-like captions:
+    - Skip clips shorter than min_clip_duration (quick cuts = visual impact, no text)
+    - Only include a transcript segment if at least min_overlap_ratio (60%) of it
+      falls within the clip — prevents chopped/inaudible sentence fragments
+    - One caption at a time — resolve overlapping captions by keeping the longer one
     """
     transcript = signals.get("transcript", {})
     if not transcript.get("tracks"):
         log.warning("No transcript data available for captions")
         return timeline
 
-    time_map = _build_time_map(timeline)
-
-    captions = []
+    # Build lookup: source filename -> list of transcript segments
+    seg_lookup = {}
     for track in transcript["tracks"]:
-        source = track["source"]
-        for seg in track.get("segments", []):
-            out_start = _map_time(time_map, source, seg["start"])
-            out_end = _map_time(time_map, source, seg["end"])
+        seg_lookup[track["source"]] = track.get("segments", [])
 
-            if out_start is not None and out_end is not None and out_end > out_start:
+    time_map = _build_time_map(timeline)
+    captions = []
+
+    for mapping in time_map:
+        source = mapping["source"]
+        src_start = mapping["src_start"]
+        src_end = mapping["src_end"]
+        clip_duration = src_end - src_start
+        out_start = mapping["out_start"]
+        speed = mapping["speed"]
+
+        # Rule 1: skip short clips — they're quick cuts, no captions needed
+        if clip_duration < min_clip_duration:
+            continue
+
+        segments = seg_lookup.get(source, [])
+
+        for seg in segments:
+            seg_duration = seg["end"] - seg["start"]
+            if seg_duration <= 0:
+                continue
+
+            # Check overlap
+            overlap_start = max(seg["start"], src_start)
+            overlap_end = min(seg["end"], src_end)
+
+            if overlap_end <= overlap_start:
+                continue
+
+            overlap_duration = overlap_end - overlap_start
+
+            # Rule 2: only include if most of the sentence is audible in this clip
+            if overlap_duration / seg_duration < min_overlap_ratio:
+                continue
+
+            # Map to output time
+            cap_out_start = out_start + (overlap_start - src_start) / speed
+            cap_out_end = out_start + (overlap_end - src_start) / speed
+
+            if cap_out_end > cap_out_start + 0.3:
                 captions.append(CaptionEntry(
-                    start=round(out_start, 3),
-                    end=round(out_end, 3),
-                    text=seg["text"],
+                    start=round(cap_out_start, 3),
+                    end=round(cap_out_end, 3),
+                    text=seg["text"].strip(),
                 ))
+
+    # Remove duplicates then resolve overlapping captions
+    captions = _deduplicate_captions(captions)
+    captions = _resolve_overlapping_captions(captions)
 
     timeline.captions = captions
     log.info("Generated %d caption entries", len(captions))
@@ -82,7 +128,7 @@ def generate_captions(
 
 
 def _build_time_map(timeline: Timeline) -> list[dict]:
-    """Build source-time → output-time mapping from clip list."""
+    """Build source-time -> output-time mapping from clip list."""
     mappings = []
     output_cursor = 0.0
 
@@ -101,13 +147,49 @@ def _build_time_map(timeline: Timeline) -> list[dict]:
     return mappings
 
 
-def _map_time(time_map: list[dict], source: str, src_time: float) -> float | None:
-    """Map a source timestamp to output timeline position."""
-    for m in time_map:
-        if m["source"] == source and m["src_start"] <= src_time <= m["src_end"]:
-            offset = (src_time - m["src_start"]) / m["speed"]
-            return m["out_start"] + offset
-    return None
+def _deduplicate_captions(captions: list[CaptionEntry]) -> list[CaptionEntry]:
+    """Remove duplicate captions that have the same text and overlapping times."""
+    if not captions:
+        return captions
+
+    # Sort by start time
+    captions.sort(key=lambda c: c.start)
+    result = [captions[0]]
+
+    for cap in captions[1:]:
+        prev = result[-1]
+        # Skip if same text and start times are very close
+        if cap.text == prev.text and abs(cap.start - prev.start) < 0.5:
+            # Keep the longer one
+            if cap.end > prev.end:
+                result[-1] = cap
+            continue
+        result.append(cap)
+
+    return result
+
+
+def _resolve_overlapping_captions(captions: list[CaptionEntry]) -> list[CaptionEntry]:
+    """Ensure only one caption is on screen at a time.
+    When two captions overlap, keep the longer one."""
+    if len(captions) <= 1:
+        return captions
+
+    captions.sort(key=lambda c: c.start)
+    result = [captions[0]]
+
+    for cap in captions[1:]:
+        prev = result[-1]
+        if cap.start < prev.end:
+            # Overlap — keep whichever is longer
+            prev_dur = prev.end - prev.start
+            cap_dur = cap.end - cap.start
+            if cap_dur > prev_dur:
+                result[-1] = cap
+        else:
+            result.append(cap)
+
+    return result
 
 
 def generate_ass_file(
@@ -193,14 +275,12 @@ def _generate_animated_lines(captions: list[CaptionEntry]) -> list[str]:
             escaped_word = _escape_ass(word)
 
             if clean_word in HYPE_WORDS:
-                # Highlighted word: yellow, slightly bigger with scale animation
                 text = (
                     f"{{\\fscx120\\fscy120\\t(0,100,\\fscx100\\fscy100)}}"
                     f"{escaped_word}"
                 )
                 lines.append(f"Dialogue: 1,{start_ts},{end_ts},Highlight,,0,0,0,,{text}")
             else:
-                # Normal word with subtle fade-in
                 text = (
                     f"{{\\fad(80,0)}}"
                     f"{escaped_word}"

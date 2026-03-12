@@ -1,4 +1,8 @@
-"""Story Composer Agent — arranges highlights into narrative structure."""
+"""Story Composer Agent — arranges highlights into chronological narrative structure.
+
+For sports/event content, preserves the original timeline order so the story
+builds naturally toward the climax (e.g., winner at the end).
+"""
 
 from app.core.logger import get_logger
 from app.storage.storage_manager import StorageManager
@@ -6,32 +10,34 @@ from app.storage.storage_manager import StorageManager
 log = get_logger(__name__)
 
 # Narrative structure templates
+# Each role defines what portion of the budget it gets and where in the
+# source timeline to pull from (early/mid/late/peak)
 STRUCTURES = {
     "high": {
-        # Hook → Build → Peak → Peak → Ending
+        # Hook (exciting teaser) → Early action → Mid build → Climax → Finale
         "segments": [
-            {"role": "hook", "pct": 0.15, "prefer": "top"},
-            {"role": "build", "pct": 0.25, "prefer": "mid"},
-            {"role": "peak", "pct": 0.25, "prefer": "top"},
-            {"role": "peak2", "pct": 0.20, "prefer": "top"},
-            {"role": "ending", "pct": 0.15, "prefer": "mid"},
+            {"role": "hook", "pct": 0.12, "source_region": "peak", "order": 0},
+            {"role": "early", "pct": 0.20, "source_region": "early", "order": 1},
+            {"role": "build", "pct": 0.25, "source_region": "mid", "order": 2},
+            {"role": "climax", "pct": 0.25, "source_region": "late", "order": 3},
+            {"role": "finale", "pct": 0.18, "source_region": "latest", "order": 4},
         ],
     },
     "medium": {
-        # Hook → Build → Peak → Ending
+        # Intro → Development → Peak → Resolution
         "segments": [
-            {"role": "hook", "pct": 0.20, "prefer": "top"},
-            {"role": "build", "pct": 0.30, "prefer": "mid"},
-            {"role": "peak", "pct": 0.30, "prefer": "top"},
-            {"role": "ending", "pct": 0.20, "prefer": "mid"},
+            {"role": "intro", "pct": 0.20, "source_region": "early", "order": 0},
+            {"role": "development", "pct": 0.30, "source_region": "mid", "order": 1},
+            {"role": "peak", "pct": 0.30, "source_region": "late", "order": 2},
+            {"role": "resolution", "pct": 0.20, "source_region": "latest", "order": 3},
         ],
     },
     "low": {
-        # Intro → Body → Conclusion
+        # Sequential — just pick best moments in chronological order
         "segments": [
-            {"role": "intro", "pct": 0.25, "prefer": "mid"},
-            {"role": "body", "pct": 0.50, "prefer": "sequential"},
-            {"role": "conclusion", "pct": 0.25, "prefer": "mid"},
+            {"role": "intro", "pct": 0.25, "source_region": "early", "order": 0},
+            {"role": "body", "pct": 0.50, "source_region": "mid", "order": 1},
+            {"role": "conclusion", "pct": 0.25, "source_region": "late", "order": 2},
         ],
     },
 }
@@ -41,12 +47,11 @@ def compose_story(
     plan: dict, highlights: list[dict], storage: StorageManager
 ) -> list[dict]:
     """
-    Arrange highlight segments into a narrative structure based on energy style.
+    Arrange highlight segments into a chronological narrative structure.
 
-    Returns ordered list of segments saved to plans/story.json:
-    [
-        {"source": "clip.mp4", "start": 5.0, "end": 8.0, "role": "hook", "score": 0.9}
-    ]
+    Key principle: segments within each story role are ordered by their
+    original source timestamp, preserving the natural event timeline.
+    For sports content this means the winning moment appears at the end.
     """
     energy = plan.get("style", {}).get("energy", "medium")
     target_duration = plan.get("target_duration")
@@ -56,39 +61,39 @@ def compose_story(
         log.warning("No highlights to compose story from")
         return []
 
-    # Separate highlights into tiers
-    sorted_hl = sorted(highlights, key=lambda h: h["score"], reverse=True)
-    n = len(sorted_hl)
-    top_third = sorted_hl[:max(1, n // 3)]
-    mid_third = sorted_hl[max(1, n // 3):max(2, 2 * n // 3)]
-    bottom_third = sorted_hl[max(2, 2 * n // 3):]
+    # Sort all highlights by source time
+    time_sorted = sorted(highlights, key=lambda h: (h["source"], h["start"]))
 
-    # Calculate duration budget per segment
+    # Find the total source duration to define regions
+    max_time = max(h["end"] for h in highlights) if highlights else 0
+    if max_time <= 0:
+        return []
+
+    # Duration budget
     if target_duration:
         total_budget = target_duration
     else:
-        # Use sum of all highlight durations, capped at source duration
         total_budget = sum(h["duration"] for h in highlights[:10])
 
     story = []
-    used_ranges = []  # Track (source, start, end) to avoid overlaps
+    used_ranges = []
 
     for seg_template in structure["segments"]:
         budget = total_budget * seg_template["pct"]
-        prefer = seg_template["prefer"]
         role = seg_template["role"]
+        region = seg_template["source_region"]
 
-        # Pick from preferred tier
-        if prefer == "top":
-            pool = top_third + mid_third
-        elif prefer == "sequential":
-            # For sequential, use time-ordered highlights
-            pool = sorted(highlights, key=lambda h: (h["source"], h["start"]))
-        else:
-            pool = mid_third + top_third + bottom_third
+        # Filter highlights by source region (where in the original video)
+        pool = _filter_by_region(time_sorted, region, max_time)
 
-        # Select segments that fit the budget and don't overlap
+        # Rank by score within the region, but we'll re-sort by time after selection
+        pool = sorted(pool, key=lambda h: h["score"], reverse=True)
+
+        # Select best segments that fit the budget
         selected = _select_for_budget(pool, budget, used_ranges)
+
+        # Sort selected by source time to preserve chronological order
+        selected = sorted(selected, key=lambda h: (h["source"], h["start"]))
 
         for seg in selected:
             story.append({
@@ -105,6 +110,26 @@ def compose_story(
     log.info("Story composed: %d segments, %.1fs total, energy=%s",
              len(story), sum(s["duration"] for s in story), energy)
     return story
+
+
+def _filter_by_region(
+    highlights: list[dict], region: str, max_time: float
+) -> list[dict]:
+    """Filter highlights by which region of the source video they come from."""
+    if region == "early":
+        return [h for h in highlights if h["start"] < max_time * 0.30]
+    elif region == "mid":
+        return [h for h in highlights if max_time * 0.20 <= h["start"] < max_time * 0.70]
+    elif region == "late":
+        return [h for h in highlights if h["start"] >= max_time * 0.55]
+    elif region == "latest":
+        # Last 30% — where the conclusion/winner typically is
+        return [h for h in highlights if h["start"] >= max_time * 0.70]
+    elif region == "peak":
+        # Top scored segments from anywhere (for hook/teaser)
+        return sorted(highlights, key=lambda h: h["score"], reverse=True)[:len(highlights) // 3]
+    else:
+        return highlights
 
 
 def _select_for_budget(
