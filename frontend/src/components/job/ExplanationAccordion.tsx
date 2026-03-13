@@ -86,12 +86,16 @@ export function ExplanationAccordion({
 /** Maps a stage name to a small colored stage indicator dot. */
 function StageIcon({ stage }: { stage: string }) {
   const colors: Record<string, string> = {
+    classification:    'bg-[#06b6d4]',   // cyan
+    strategy:          'bg-[#14b8a6]',   // teal
+    visual_scoring:    'bg-[#a855f7]',   // violet
     planning:          'bg-[var(--accent)]',
     transcription:     'bg-[#06b6d4]',   // cyan
     silence_detection: 'bg-[#8b5cf6]',   // purple
     shot_detection:    'bg-[#f59e0b]',   // amber
     motion_analysis:   'bg-[#10b981]',   // emerald
     face_detection:    'bg-[#ec4899]',   // pink
+    diarization:       'bg-[#f472b6]',   // pink-light
     highlights:        'bg-[#f97316]',   // orange
     story:             'bg-[#6366f1]',   // indigo
     editing:           'bg-[var(--accent)]',
