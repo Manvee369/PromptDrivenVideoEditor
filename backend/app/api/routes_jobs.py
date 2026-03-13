@@ -96,3 +96,35 @@ async def download_output(job_id: str):
         media_type="video/mp4",
         filename=f"edited_{job_id[:8]}.mp4",
     )
+
+
+@router.get("/{job_id}/explanation")
+async def get_explanation(job_id: str):
+    """Return the explanation of editing decisions for this job."""
+    job = jobs_db.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    storage = StorageManager(job_id)
+    if not storage.has_json("outputs", "explanation"):
+        raise HTTPException(status_code=404, detail="Explanation not yet generated")
+
+    return storage.load_json("outputs", "explanation")
+
+
+@router.get("/{job_id}/thumbnail")
+async def get_thumbnail(job_id: str):
+    """Download the generated thumbnail for this job."""
+    job = jobs_db.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_path = StorageManager(job_id).output_path("thumbnail.png")
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not yet generated")
+
+    return FileResponse(
+        str(output_path),
+        media_type="image/png",
+        filename=f"thumbnail_{job_id[:8]}.png",
+    )

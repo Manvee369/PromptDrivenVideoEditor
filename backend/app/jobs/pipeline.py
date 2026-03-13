@@ -2,13 +2,16 @@
 
 from app.agents.captions import generate_ass_file, generate_captions
 from app.agents.editing import build_timeline
+from app.agents.explanation import generate_explanation
 from app.agents.highlight import select_highlights
 from app.agents.music import analyze_music
 from app.agents.planner import plan_edit
 from app.agents.story import compose_story
+from app.agents.thumbnail import generate_thumbnail
 from app.core.logger import get_logger
 from app.db.jobs_db import JobStatus, jobs_db
 from app.intelligence.audio_features import compute_audio_energy, detect_silence
+from app.intelligence.faces import detect_faces
 from app.intelligence.motion import detect_motion
 from app.intelligence.shots import detect_shots
 from app.intelligence.transcribe import transcribe_media
@@ -58,6 +61,10 @@ def run_pipeline(job_id: str, prompt: str) -> str:
         log.info("[%s] Stage 2: Intelligence — motion detection", job_id)
         motion = detect_motion(storage)
 
+        _update(job_id, JobStatus.INTELLIGENCE, 0.45)
+        log.info("[%s] Stage 2: Intelligence — face detection", job_id)
+        faces = detect_faces(storage)
+
         # Music analysis (only if music files uploaded)
         music_analysis = analyze_music(storage)
 
@@ -71,6 +78,7 @@ def run_pipeline(job_id: str, prompt: str) -> str:
             "audio_energy": audio_energy,
             "shots": shots,
             "motion": motion,
+            "faces": faces,
             "music_analysis": music_analysis,
         }
         plan = plan_edit(prompt, signals, storage)
@@ -124,6 +132,20 @@ def run_pipeline(job_id: str, prompt: str) -> str:
         # --- Stage 5: Rendering ---
         log.info("[%s] Stage 5: Rendering", job_id)
         output_path = render_timeline(storage)
+
+        # --- Stage 6: Post-processing (thumbnail + explanation) ---
+        _update(job_id, JobStatus.RENDERING, 0.90)
+        log.info("[%s] Stage 6: Generating thumbnail", job_id)
+        try:
+            generate_thumbnail(plan, signals, storage)
+        except Exception as e:
+            log.warning("[%s] Thumbnail generation failed (non-fatal): %s", job_id, e)
+
+        log.info("[%s] Stage 6: Generating explanation", job_id)
+        try:
+            generate_explanation(plan, signals, storage)
+        except Exception as e:
+            log.warning("[%s] Explanation generation failed (non-fatal): %s", job_id, e)
 
         # Done
         _update(job_id, JobStatus.COMPLETED, 1.0, output_file=str(output_path))

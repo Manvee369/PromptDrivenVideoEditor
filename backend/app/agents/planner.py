@@ -98,11 +98,11 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
 
     # Build highlight scoring priorities based on energy
     if energy == "high":
-        priorities = {"motion": 0.40, "audio_peak": 0.30, "speech": 0.15, "shot_variety": 0.15}
+        priorities = {"motion": 0.35, "audio_peak": 0.25, "speech": 0.10, "shot_variety": 0.15, "face": 0.15}
     elif energy == "low":
-        priorities = {"motion": 0.15, "audio_peak": 0.20, "speech": 0.45, "shot_variety": 0.20}
+        priorities = {"motion": 0.10, "audio_peak": 0.15, "speech": 0.35, "shot_variety": 0.15, "face": 0.25}
     else:
-        priorities = {"motion": 0.35, "audio_peak": 0.30, "speech": 0.20, "shot_variety": 0.15}
+        priorities = {"motion": 0.30, "audio_peak": 0.25, "speech": 0.15, "shot_variety": 0.15, "face": 0.15}
 
     plan = {
         "goal": prompt,

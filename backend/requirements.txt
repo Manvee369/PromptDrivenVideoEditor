@@ -18,6 +18,12 @@ soxr
 # Scene detection
 scenedetect[opencv]
 
+# Face detection
+mediapipe
+
+# Image processing (thumbnails)
+Pillow
+
 # Transcription
 openai-whisper
 

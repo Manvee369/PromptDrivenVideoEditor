@@ -7,10 +7,11 @@ log = get_logger(__name__)
 
 # Default scoring weights
 DEFAULT_WEIGHTS = {
-    "motion": 0.35,
-    "audio_peak": 0.30,
-    "speech": 0.20,
+    "motion": 0.30,
+    "audio_peak": 0.25,
+    "speech": 0.15,
     "shot_variety": 0.15,
+    "face": 0.15,
 }
 
 
@@ -34,12 +35,14 @@ def select_highlights(
     audio_w = weights.get("audio_peak", DEFAULT_WEIGHTS["audio_peak"])
     speech_w = weights.get("speech", DEFAULT_WEIGHTS["speech"])
     variety_w = weights.get("shot_variety", DEFAULT_WEIGHTS["shot_variety"])
+    face_w = weights.get("face", DEFAULT_WEIGHTS["face"])
 
     manifest = signals.get("media_manifest", {})
     shots_data = signals.get("shots", {})
     motion_data = signals.get("motion", {})
     energy_data = signals.get("audio_energy", {})
     silence_data = signals.get("silence", {})
+    faces_data = signals.get("faces", {})
 
     candidates = []
 
@@ -55,6 +58,7 @@ def select_highlights(
         motion_scores = _get_motion_lookup(motion_data, filename)
         peaks = _get_peaks_lookup(energy_data, filename)
         speech_regions = _get_speech_regions(silence_data, filename)
+        face_detections = _get_face_detections(faces_data, filename)
 
         for shot in shots:
             start, end = shot["start"], shot["end"]
@@ -75,6 +79,11 @@ def select_highlights(
             if speech_score > 0.5:
                 reasons.append("has speech")
 
+            # Face presence score
+            face_score = _face_presence_in_range(face_detections, start, end)
+            if face_score > 0.3:
+                reasons.append(f"face detected ({face_score:.2f})")
+
             # Shot variety: shorter shots get a boost (more dynamic)
             shot_dur = end - start
             variety_score = min(1.0, 5.0 / max(shot_dur, 0.5))
@@ -86,6 +95,7 @@ def select_highlights(
                 + audio_w * peak_score
                 + speech_w * speech_score
                 + variety_w * variety_score
+                + face_w * face_score
             )
 
             candidates.append({
@@ -100,6 +110,7 @@ def select_highlights(
                     "audio_peak": round(peak_score, 4),
                     "speech": round(speech_score, 4),
                     "shot_variety": round(variety_score, 4),
+                    "face": round(face_score, 4),
                 },
             })
 
@@ -148,6 +159,21 @@ def _get_speech_regions(silence_data: dict, filename: str) -> list[dict]:
         if track["source"] == filename:
             return track.get("speech_regions", [])
     return []
+
+
+def _get_face_detections(faces_data: dict, filename: str) -> list[dict]:
+    for track in faces_data.get("tracks", []):
+        if track["source"] == filename:
+            return track.get("detections", [])
+    return []
+
+
+def _face_presence_in_range(detections: list[dict], start: float, end: float) -> float:
+    """Average face confidence in the time range. 0 if no faces."""
+    relevant = [d for d in detections if start <= d["time"] <= end and d["count"] > 0]
+    if not relevant:
+        return 0.0
+    return sum(d["confidence"] for d in relevant) / len(relevant)
 
 
 def _avg_motion_in_range(scores: list[dict], start: float, end: float) -> float:

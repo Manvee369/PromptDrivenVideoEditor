@@ -46,3 +46,7 @@ uvicorn==0.41.0
 # Added for Phase 1 MVP
 pydantic-settings
 openai-whisper
+
+# Phase 3
+mediapipe
+Pillow
