@@ -84,6 +84,8 @@ def llm_plan_edit(prompt: str, signals: dict) -> dict | None:
     try:
         if settings.llm_provider == "anthropic":
             response = _call_anthropic(user_message)
+        elif settings.llm_provider == "groq":
+            response = _call_groq(user_message)
         else:
             response = _call_openai(user_message)
 
@@ -138,6 +140,34 @@ def _build_media_summary(signals: dict) -> str:
             lines.append(f"Speakers: {t.get('num_speakers', 1)} detected")
 
     return "\n".join(lines)
+
+
+def _call_groq(user_message: str) -> str | None:
+    """Call Groq API (OpenAI-compatible)."""
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": settings.llm_model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.3,
+            "max_completion_tokens": 800,
+        },
+        timeout=30,
+    )
+
+    if resp.status_code != 200:
+        log.warning("Groq API returned %d: %s", resp.status_code, resp.text[:200])
+        return None
+
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
 
 
 def _call_openai(user_message: str) -> str | None:

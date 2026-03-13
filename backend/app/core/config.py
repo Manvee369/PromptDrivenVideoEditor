@@ -35,14 +35,14 @@ class Settings(BaseSettings):
 
     # LLM Planner
     llm_api_key: str = ""
-    llm_provider: str = "openai"        # "openai" or "anthropic"
-    llm_model: str = "gpt-4o-mini"
+    llm_provider: str = "groq"          # "groq", "openai", or "anthropic"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_planner_enabled: bool = True
 
     # Logging
     log_level: str = "INFO"
 
-    model_config = {"env_prefix": "PDVE_"}
+    model_config = {"env_prefix": "PDVE_", "env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 settings = Settings()

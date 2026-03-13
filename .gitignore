@@ -6,4 +6,5 @@ backend/storage/
 uploads/
 processed/
 .env
+**/.env
 backend/models/
