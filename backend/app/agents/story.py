@@ -124,8 +124,8 @@ def compose_story(
             used_ranges.append((seg["source"], seg["start"], seg["end"]))
 
     storage.save_plan("story", story)
-    log.info("Story composed: %d segments, %.1fs total, energy=%s",
-             len(story), sum(s["duration"] for s in story), energy)
+    log.info("Story composed: %d segments, %.1fs total, structure=%s",
+             len(story), sum(s["duration"] for s in story), story_key)
     return story
 
 

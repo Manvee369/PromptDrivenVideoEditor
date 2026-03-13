@@ -31,6 +31,7 @@ openai-whisper
 open-clip-torch
 torch
 torchvision
+transformers
 
 # HTTP
 requests

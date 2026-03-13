@@ -70,7 +70,22 @@ def _load_model():
         settings.visual_model,
         pretrained=settings.visual_pretrained,
     )
-    _tokenizer = open_clip.get_tokenizer(settings.visual_model)
+
+    # SigLIP uses a HuggingFace tokenizer — requires `transformers` package.
+    try:
+        _tokenizer = open_clip.get_tokenizer(settings.visual_model)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load tokenizer for '{settings.visual_model}'. "
+            "Ensure `transformers` is installed: pip install transformers"
+        ) from exc
+
+    if _tokenizer is None:
+        raise RuntimeError(
+            f"get_tokenizer returned None for '{settings.visual_model}'. "
+            "Check open_clip and transformers versions."
+        )
+
     _model = _model.to(device)
     _model.eval()
     log.info("SigLIP model loaded successfully")
