@@ -1,0 +1,248 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design Tokens ─────────────────────────────────────────────────────── */
+
+:root {
+  /* Base surfaces */
+  --background:    #0a0a0f;
+  --surface-1:     #111118;
+  --surface-2:     #18181f;
+  --surface-3:     #1f1f28;
+  --surface-4:     #26262f;
+
+  /* Borders */
+  --border:        #2a2a35;
+  --border-subtle: #1e1e28;
+  --border-strong: #3a3a48;
+
+  /* Text */
+  --text-primary:  #f0f0f5;
+  --text-secondary:#ababc0;
+  --text-tertiary: #7e7e96;
+  --text-inverse:  #0a0a0f;
+
+  /* Accent — Electric Indigo */
+  --accent:        #7c6aff;
+  --accent-hover:  #9080ff;
+  --accent-active: #6355e0;
+  --accent-subtle: rgba(124, 106, 255, 0.09);
+  --accent-border: rgba(124, 106, 255, 0.25);
+  --accent-glow:   rgba(124, 106, 255, 0.16);
+
+  /* Semantic status */
+  --status-created:        #7e7e96;
+  --status-processing:     #d97706;
+  --status-intelligence:   #d97706;
+  --status-planning:       #d97706;
+  --status-rendering:      #d97706;
+  --status-success:        #10b981;
+  --status-error:          #ef4444;
+
+  --status-created-bg:     rgba(92, 92, 114, 0.12);
+  --status-processing-bg:  rgba(217, 119, 6, 0.12);
+  --status-success-bg:     rgba(16, 185, 129, 0.12);
+  --status-error-bg:       rgba(239, 68, 68, 0.12);
+
+  /* Elevation */
+  --overlay:    rgba(0, 0, 0, 0.5);
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:  0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg:  0 12px 40px rgba(0, 0, 0, 0.65);
+
+  /* Geometry */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+
+  /* Motion */
+  --ease-out:      cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0.0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 350ms;
+}
+
+/* Light mode override layer */
+.light {
+  --background:    #f5f5fa;
+  --surface-1:     #ffffff;
+  --surface-2:     #f0f0f7;
+  --surface-3:     #e8e8f0;
+  --surface-4:     #d8d8e8;
+  --border:        #d0d0de;
+  --border-subtle: #e4e4f0;
+  --border-strong: #b0b0c8;
+  --text-primary:  #0f0f1a;
+  --text-secondary:#4a4a60;
+  --text-tertiary: #8888a0;
+  --text-inverse:  #f0f0f5;
+  --overlay:       rgba(0, 0, 0, 0.25);
+  --shadow-sm:     0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-lg:     0 12px 40px rgba(0, 0, 0, 0.16);
+  --accent-subtle: rgba(124, 106, 255, 0.07);
+  --accent-glow:   rgba(124, 106, 255, 0.12);
+}
+
+/* ─── Base Reset ─────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Typography Utilities ───────────────────────────────────────────────── */
+
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Scrollbar Styling ──────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* ─── Focus Rings ────────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+
+::selection {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+/* ─── Keyframes ──────────────────────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.35; transform: scale(0.82); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── Animation Classes ──────────────────────────────────────────────────── */
+
+.animate-pulse-dot   { animation: pulse-dot 1.8s ease-in-out infinite; }
+.animate-shimmer     { animation: shimmer 2s ease-in-out infinite; }
+.animate-fade-in     { animation: fade-in 200ms var(--ease-out) forwards; }
+.animate-slide-up    { animation: slide-up 220ms var(--ease-out) forwards; }
+.animate-slide-left  { animation: slide-in-left 180ms var(--ease-out) forwards; }
+.animate-spin        { animation: spin 0.7s linear infinite; }
+
+/* ─── Reduced Motion ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Custom Range Input (scrubber) ─────────────────────────────────────── */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 4px;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  background: var(--surface-4);
+  border-radius: var(--radius-full);
+  height: 4px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  height: 14px;
+  margin-top: -5px;
+  width: 14px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+/* ─── Video Player Track Override ────────────────────────────────────────── */
+
+.video-scrubber::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--progress, 0%),
+    var(--surface-4) var(--progress, 0%)
+  );
+}
