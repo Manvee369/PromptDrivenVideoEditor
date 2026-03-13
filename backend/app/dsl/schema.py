@@ -22,8 +22,9 @@ class ClipRef(BaseModel):
     end: float                                      # seconds
     speed: float = 1.0
     volume: float = 1.0
-    transition_in: str | None = None                # "fade", "flash", "cut"
-    transition_duration: float = 0.0
+    transition_in: str | None = None                # "crossfade", "fade", "flash", None
+    transition_duration: float = 0.3
+    zoom: float = 1.0                               # 1.0 = no zoom, 1.3 = 30% zoom-in
     filters: list[str] = Field(default_factory=list)  # raw FFmpeg filter strings
 
     @property
@@ -64,8 +65,12 @@ class Timeline(BaseModel):
     music: MusicTrack | None = None
 
     def total_duration(self) -> float:
-        """Sum of effective clip durations."""
-        return sum(c.effective_duration for c in self.clips)
+        """Sum of effective clip durations, accounting for crossfade overlap."""
+        total = sum(c.effective_duration for c in self.clips)
+        for c in self.clips[1:]:
+            if c.transition_in == "crossfade":
+                total -= c.transition_duration
+        return total
 
     def validate_sources(self, available_files: list[str]) -> list[str]:
         """Return list of source files referenced but not available."""

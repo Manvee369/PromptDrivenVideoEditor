@@ -41,13 +41,15 @@ def generate_explanation(
     operations = plan.get("operations", [])
     style = plan.get("style", {})
     target = plan.get("target_duration")
+    planner_type = plan.get("planner", "rule_based")
 
     decisions.append({
         "stage": "planning",
         "detail": f"Detected operations: {', '.join(operations)}. "
                   f"Style: {style.get('energy', 'medium')} energy, "
                   f"aspect ratio {style.get('aspect', '16:9')}."
-                  + (f" Target duration: {target}s." if target else ""),
+                  + (f" Target duration: {target}s." if target else "")
+                  + f" Planner: {planner_type}.",
     })
 
     # Intelligence stats
@@ -99,6 +101,17 @@ def generate_explanation(
                 "stage": "face_detection",
                 "detail": f"Detected faces in {face_regions} regions of the video.",
             })
+
+    diarization = signals.get("diarization")
+    if diarization:
+        for track in diarization.get("tracks", []):
+            n_speakers = track.get("num_speakers", 0)
+            n_turns = len(track.get("speaker_turns", []))
+            if n_speakers > 1:
+                decisions.append({
+                    "stage": "diarization",
+                    "detail": f"Identified {n_speakers} speakers with {n_turns} speaker turns.",
+                })
 
     # Highlight stats
     highlights = signals.get("highlights")

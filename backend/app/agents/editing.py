@@ -80,6 +80,10 @@ def build_timeline(plan: dict, signals: dict, storage: StorageManager) -> Timeli
         for clip in clips:
             clip.filters.append("colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3")
 
+    # Apply transitions
+    if "add_transitions" in operations:
+        clips = _apply_transitions(clips, plan)
+
     # Beat sync: snap cut points to beats
     if "beat_sync" in operations:
         music_analysis = signals.get("music_analysis")
@@ -188,6 +192,44 @@ def _get_speech_regions(silence_data: dict, filename: str) -> list[dict]:
         if track["source"] == filename:
             return track.get("speech_regions", [])
     return []
+
+
+def _apply_transitions(clips: list[ClipRef], plan: dict) -> list[ClipRef]:
+    """Assign transition types between clips based on plan energy/style."""
+    if len(clips) <= 1:
+        return clips
+
+    energy = plan.get("style", {}).get("energy", "medium")
+    transition_style = plan.get("style", {}).get("transitions", "auto")
+
+    if transition_style == "none":
+        return clips
+
+    for i, clip in enumerate(clips):
+        if i == 0:
+            # First clip: fade in from black
+            clip.transition_in = "fade"
+            clip.transition_duration = 0.5
+            continue
+
+        if energy == "high":
+            # High energy: alternate between crossfade and flash
+            if i % 4 == 0:
+                clip.transition_in = "flash"
+                clip.transition_duration = 0.2
+            else:
+                clip.transition_in = "crossfade"
+                clip.transition_duration = 0.3
+        elif energy == "low":
+            # Low energy: smooth crossfades
+            clip.transition_in = "crossfade"
+            clip.transition_duration = 0.8
+        else:
+            # Medium: standard crossfades
+            clip.transition_in = "crossfade"
+            clip.transition_duration = 0.5
+
+    return clips
 
 
 def _trim_to_duration(clips: list[ClipRef], target: float) -> list[ClipRef]:

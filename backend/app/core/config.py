@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     silence_threshold_db: float = -40.0
     silence_min_duration: float = 0.3
 
+    # Diarization
+    diarization_enabled: bool = True
+    diarization_max_speakers: int = 6
+
+    # LLM Planner
+    llm_api_key: str = ""
+    llm_provider: str = "openai"        # "openai" or "anthropic"
+    llm_model: str = "gpt-4o-mini"
+    llm_planner_enabled: bool = True
+
     # Logging
     log_level: str = "INFO"
 

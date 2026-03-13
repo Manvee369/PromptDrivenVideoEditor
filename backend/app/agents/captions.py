@@ -50,7 +50,7 @@ HYPE_WORDS = {
 def generate_captions(
     timeline: Timeline, signals: dict, storage: StorageManager,
     min_clip_duration: float = 2.0,
-    min_overlap_ratio: float = 0.6,
+    min_overlap_ratio: float = 0.4,
 ) -> Timeline:
     """
     Find transcript segments that overlap with each clip in the timeline,
@@ -58,8 +58,8 @@ def generate_captions(
 
     Filtering rules for clean, human-like captions:
     - Skip clips shorter than min_clip_duration (quick cuts = visual impact, no text)
-    - Only include a transcript segment if at least min_overlap_ratio (60%) of it
-      falls within the clip — prevents chopped/inaudible sentence fragments
+    - Only include a transcript segment if at least min_overlap_ratio (40%) of it
+      falls within the clip — balances clean captions with coverage on short clips
     - One caption at a time — resolve overlapping captions by keeping the longer one
     """
     transcript = signals.get("transcript", {})
@@ -71,6 +71,9 @@ def generate_captions(
     seg_lookup = {}
     for track in transcript["tracks"]:
         seg_lookup[track["source"]] = track.get("segments", [])
+
+    # Build speaker lookup from diarization if available
+    speaker_lookup = _build_speaker_lookup(signals.get("diarization"))
 
     time_map = _build_time_map(timeline)
     captions = []
@@ -112,10 +115,15 @@ def generate_captions(
             cap_out_end = out_start + (overlap_end - src_start) / speed
 
             if cap_out_end > cap_out_start + 0.3:
+                text = seg["text"].strip()
+                # Prefix with speaker label if multi-speaker
+                speaker = _get_speaker(speaker_lookup, source, seg["start"])
+                if speaker:
+                    text = f"[{speaker}] {text}"
                 captions.append(CaptionEntry(
                     start=round(cap_out_start, 3),
                     end=round(cap_out_end, 3),
-                    text=seg["text"].strip(),
+                    text=text,
                 ))
 
     # Remove duplicates then resolve overlapping captions
@@ -302,3 +310,27 @@ def _seconds_to_ass_time(seconds: float) -> str:
     s = int(seconds % 60)
     cs = int((seconds % 1) * 100)
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def _build_speaker_lookup(diarization: dict | None) -> dict:
+    """Build lookup: (source, time) -> speaker label. Only for multi-speaker tracks."""
+    if not diarization:
+        return {}
+    lookup = {}
+    for track in diarization.get("tracks", []):
+        if track.get("num_speakers", 1) <= 1:
+            continue
+        source = track["source"]
+        lookup[source] = track.get("segments", [])
+    return lookup
+
+
+def _get_speaker(speaker_lookup: dict, source: str, time: float) -> str | None:
+    """Find speaker label for a given source and time."""
+    segments = speaker_lookup.get(source)
+    if not segments:
+        return None
+    for seg in segments:
+        if seg["start"] <= time <= seg["end"]:
+            return seg["speaker"]
+    return None

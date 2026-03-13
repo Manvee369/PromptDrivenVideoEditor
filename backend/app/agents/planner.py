@@ -1,11 +1,11 @@
-"""Planner Agent — rule-based prompt parsing with Phase 2 signal awareness.
+"""Planner Agent — tries LLM-based planning first, falls back to rule-based.
 
 Reads user prompt + signal summaries, outputs a structured plan.
-Same function signature as a future LLM-based planner.
 """
 
 import re
 
+from app.core.config import settings
 from app.core.logger import get_logger
 from app.storage.storage_manager import StorageManager
 
@@ -28,23 +28,41 @@ ASPECT_DIMENSIONS = {
 
 def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
     """
-    Parse prompt for editing intent and produce a structured plan.
+    Produce a structured editing plan from the prompt.
 
-    Args:
-        prompt: User's natural language editing prompt
-        signals: Dict with keys like "media_manifest", "transcript", "silence", "shots", "motion"
-        storage: StorageManager for saving the plan
-
-    Returns:
-        Plan dict saved to plans/plan.json
+    Tries LLM planner first (if API key configured), falls back to rule-based.
     """
+    # Try LLM planner
+    if settings.llm_planner_enabled and settings.llm_api_key:
+        try:
+            from app.agents.llm_planner import llm_plan_edit
+            llm_plan = llm_plan_edit(prompt, signals)
+            if llm_plan:
+                # Add computed fields
+                llm_plan["total_media_duration"] = _total_media_duration(signals)
+                storage.save_plan("plan", llm_plan)
+                log.info("LLM plan created: operations=%s, energy=%s",
+                         llm_plan.get("operations"), llm_plan.get("style", {}).get("energy"))
+                return llm_plan
+        except Exception as e:
+            log.warning("LLM planner failed, falling back to rules: %s", e)
+
+    # Rule-based fallback
+    plan = _rule_based_plan(prompt, signals)
+    storage.save_plan("plan", plan)
+    log.info("Rule-based plan created: operations=%s, duration=%s, aspect=%s, energy=%s",
+             plan["operations"], plan["target_duration"],
+             plan["style"]["aspect"], plan["style"]["energy"])
+    return plan
+
+
+def _rule_based_plan(prompt: str, signals: dict) -> dict:
+    """Original keyword-matching planner logic."""
     prompt_lower = prompt.lower()
     operations = []
 
-    # Detect target duration
     target_duration = _parse_duration(prompt_lower)
 
-    # Detect aspect ratio
     aspect = "16:9"
     for keyword, ratio in ASPECT_KEYWORDS.items():
         if keyword in prompt_lower:
@@ -53,7 +71,6 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
 
     width, height = ASPECT_DIMENSIONS.get(aspect, (1920, 1080))
 
-    # Detect operations
     if any(kw in prompt_lower for kw in ["remove silence", "cut silence", "no silence", "remove pauses"]):
         operations.append("remove_silence")
 
@@ -69,7 +86,6 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
     if any(kw in prompt_lower for kw in ["trim", "short", "clip", "cut to"]):
         operations.append("trim")
 
-    # Phase 2 operations
     if any(kw in prompt_lower for kw in ["highlight", "best moments", "best parts", "top moments"]):
         operations.append("highlight_select")
 
@@ -80,23 +96,22 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
     if any(kw in prompt_lower for kw in ["music", "beat", "beat sync", "rhythm"]):
         operations.append("beat_sync")
 
-    # Deduplicate
+    if any(kw in prompt_lower for kw in ["transition", "crossfade", "smooth", "flash", "zoom"]):
+        operations.append("add_transitions")
+
+    # Auto-add transitions for montages and reels
+    if any(op in operations for op in ["highlight_select", "story_compose"]):
+        if "add_transitions" not in operations:
+            operations.append("add_transitions")
+
     operations = list(dict.fromkeys(operations))
 
-    # Detect energy/style
     energy = "medium"
     if any(kw in prompt_lower for kw in ["hype", "energetic", "fast", "intense", "montage"]):
         energy = "high"
     elif any(kw in prompt_lower for kw in ["calm", "slow", "relaxed", "chill"]):
         energy = "low"
 
-    # Calculate total media duration from manifest
-    total_media_duration = 0.0
-    if "media_manifest" in signals:
-        for f in signals["media_manifest"].get("files", []):
-            total_media_duration += f.get("duration", 0)
-
-    # Build highlight scoring priorities based on energy
     if energy == "high":
         priorities = {"motion": 0.35, "audio_peak": 0.25, "speech": 0.10, "shot_variety": 0.15, "face": 0.15}
     elif energy == "low":
@@ -104,10 +119,10 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
     else:
         priorities = {"motion": 0.30, "audio_peak": 0.25, "speech": 0.15, "shot_variety": 0.15, "face": 0.15}
 
-    plan = {
+    return {
         "goal": prompt,
         "target_duration": target_duration,
-        "total_media_duration": total_media_duration,
+        "total_media_duration": _total_media_duration(signals),
         "style": {
             "aspect": aspect,
             "width": width,
@@ -117,12 +132,17 @@ def plan_edit(prompt: str, signals: dict, storage: StorageManager) -> dict:
         "operations": operations,
         "priorities": priorities,
         "constraints": {},
+        "planner": "rule_based",
     }
 
-    storage.save_plan("plan", plan)
-    log.info("Plan created: operations=%s, duration=%s, aspect=%s, energy=%s",
-             operations, target_duration, aspect, energy)
-    return plan
+
+def _total_media_duration(signals: dict) -> float:
+    """Sum duration of all media files."""
+    total = 0.0
+    if "media_manifest" in signals:
+        for f in signals["media_manifest"].get("files", []):
+            total += f.get("duration", 0)
+    return total
 
 
 def _parse_duration(text: str) -> float | None:

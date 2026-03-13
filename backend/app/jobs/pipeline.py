@@ -8,9 +8,11 @@ from app.agents.music import analyze_music
 from app.agents.planner import plan_edit
 from app.agents.story import compose_story
 from app.agents.thumbnail import generate_thumbnail
+from app.core.config import settings
 from app.core.logger import get_logger
 from app.db.jobs_db import JobStatus, jobs_db
 from app.intelligence.audio_features import compute_audio_energy, detect_silence
+from app.intelligence.diarization import diarize
 from app.intelligence.faces import detect_faces
 from app.intelligence.motion import detect_motion
 from app.intelligence.shots import detect_shots
@@ -48,6 +50,16 @@ def run_pipeline(job_id: str, prompt: str) -> str:
         log.info("[%s] Stage 2: Intelligence — transcription", job_id)
         transcript = transcribe_media(storage)
 
+        # Speaker diarization (depends on transcript)
+        diarization = None
+        if settings.diarization_enabled:
+            _update(job_id, JobStatus.INTELLIGENCE, 0.20)
+            log.info("[%s] Stage 2: Intelligence — speaker diarization", job_id)
+            try:
+                diarization = diarize(storage, max_speakers=settings.diarization_max_speakers)
+            except Exception as e:
+                log.warning("[%s] Diarization failed (non-fatal): %s", job_id, e)
+
         _update(job_id, JobStatus.INTELLIGENCE, 0.25)
         log.info("[%s] Stage 2: Intelligence — silence detection", job_id)
         silence = detect_silence(storage)
@@ -79,6 +91,7 @@ def run_pipeline(job_id: str, prompt: str) -> str:
             "shots": shots,
             "motion": motion,
             "faces": faces,
+            "diarization": diarization,
             "music_analysis": music_analysis,
         }
         plan = plan_edit(prompt, signals, storage)

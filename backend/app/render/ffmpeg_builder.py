@@ -1,4 +1,7 @@
-"""Translates a Timeline DSL into FFmpeg commands."""
+"""Translates a Timeline DSL into FFmpeg commands.
+
+Supports transitions (crossfade, fade, flash), zoom effects, and music mixing.
+"""
 
 from pathlib import Path
 
@@ -35,12 +38,18 @@ class FFmpegCommandBuilder:
             cmd.extend(["-i", str(raw_path)])
 
         # Build complex filtergraph
-        filtergraph, out_v, out_a = self._build_filtergraph(source_index)
+        has_crossfade = any(
+            c.transition_in == "crossfade" for c in self.timeline.clips[1:]
+        )
+
+        if has_crossfade:
+            filtergraph, out_v, out_a = self._build_filtergraph_with_xfade(source_index)
+        else:
+            filtergraph, out_v, out_a = self._build_filtergraph(source_index)
 
         # Check for subtitle file
         ass_path = self.storage.render_path("captions.ass")
         if ass_path.exists():
-            # Escape Windows path backslashes and colons for ASS filter
             ass_escaped = str(ass_path).replace("\\", "/").replace(":", "\\:")
             filtergraph += f";[{out_v}]ass='{ass_escaped}'[subbed]"
             out_v = "subbed"
@@ -66,14 +75,12 @@ class FFmpegCommandBuilder:
 
         return cmd
 
-    def _build_filtergraph(self, source_index: dict[str, int]) -> tuple[str, str, str]:
-        """
-        Build a complex filtergraph that trims, scales, and concatenates clips.
-
-        Returns: (filtergraph_string, video_output_label, audio_output_label)
-        """
+    def _build_clip_chains(self, source_index: dict[str, int]) -> tuple[list[str], list[str], list[str]]:
+        """Build per-clip video and audio filter chains.
+        Returns: (filters, video_labels, audio_labels)"""
         filters = []
-        concat_inputs = []
+        v_labels = []
+        a_labels = []
         w, h = self.fmt.width, self.fmt.height
 
         for i, clip in enumerate(self.timeline.clips):
@@ -81,7 +88,7 @@ class FFmpegCommandBuilder:
             v_label = f"v{i}"
             a_label = f"a{i}"
 
-            # Video: trim -> setpts -> optional speed -> scale -> pad
+            # Video chain: trim -> setpts -> speed -> zoom -> filters -> scale -> pad
             v_chain = (
                 f"[{idx}:v]trim={clip.start}:{clip.end},setpts=PTS-STARTPTS"
             )
@@ -89,7 +96,16 @@ class FFmpegCommandBuilder:
             if clip.speed != 1.0:
                 v_chain += f",setpts=PTS/{clip.speed}"
 
-            # Apply custom filters
+            # Zoom effect (zoompan)
+            if clip.zoom > 1.0:
+                z = clip.zoom
+                v_chain += (
+                    f",zoompan=z={z}:d=1"
+                    f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                    f":s={w}x{h}:fps={self.fmt.fps}"
+                )
+
+            # Custom filters
             for filt in clip.filters:
                 v_chain += f",{filt}"
 
@@ -97,11 +113,20 @@ class FFmpegCommandBuilder:
                 f",scale={w}:{h}:force_original_aspect_ratio=decrease"
                 f",pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
                 f",setsar=1"
-                f"[{v_label}]"
             )
+
+            # Per-clip fade/flash transitions (non-crossfade)
+            if clip.transition_in == "fade" and i > 0:
+                d = clip.transition_duration
+                v_chain += f",fade=t=in:d={d}"
+            elif clip.transition_in == "flash" and i > 0:
+                d = clip.transition_duration
+                v_chain += f",fade=t=in:d={d}:color=white"
+
+            v_chain += f"[{v_label}]"
             filters.append(v_chain)
 
-            # Audio: atrim -> asetpts -> optional tempo
+            # Audio chain: atrim -> asetpts -> volume -> tempo -> fade
             a_chain = (
                 f"[{idx}:a]atrim={clip.start}:{clip.end},asetpts=PTS-STARTPTS"
             )
@@ -112,15 +137,83 @@ class FFmpegCommandBuilder:
             if clip.speed != 1.0:
                 a_chain += f",atempo={clip.speed}"
 
+            if clip.transition_in in ("fade", "flash") and i > 0:
+                d = clip.transition_duration
+                a_chain += f",afade=t=in:d={d}"
+
             a_chain += f"[{a_label}]"
             filters.append(a_chain)
 
-            concat_inputs.append(f"[{v_label}][{a_label}]")
+            v_labels.append(v_label)
+            a_labels.append(a_label)
+
+        return filters, v_labels, a_labels
+
+    def _build_filtergraph(self, source_index: dict[str, int]) -> tuple[str, str, str]:
+        """Build filtergraph with concat (no crossfade transitions)."""
+        filters, v_labels, a_labels = self._build_clip_chains(source_index)
 
         # Concatenate all clips
         n = len(self.timeline.clips)
-        concat = "".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]"
+        concat_inputs = "".join(f"[{v}][{a}]" for v, a in zip(v_labels, a_labels))
+        concat = concat_inputs + f"concat=n={n}:v=1:a=1[outv][outa]"
         filters.append(concat)
+
+        # Mix in background music if present
+        out_a = "outa"
+        if self.timeline.music and self.timeline.music.source:
+            out_a = self._add_music_mix(filters, source_index)
+
+        filtergraph = ";".join(filters)
+        return filtergraph, "outv", out_a
+
+    def _build_filtergraph_with_xfade(self, source_index: dict[str, int]) -> tuple[str, str, str]:
+        """Build filtergraph using xfade for crossfade transitions."""
+        filters, v_labels, a_labels = self._build_clip_chains(source_index)
+
+        clips = self.timeline.clips
+
+        # Chain xfade between video streams
+        current_v = v_labels[0]
+        current_a = a_labels[0]
+        accumulated_dur = clips[0].effective_duration
+
+        for i in range(1, len(clips)):
+            clip = clips[i]
+
+            if clip.transition_in == "crossfade":
+                d = min(clip.transition_duration, accumulated_dur * 0.5, clip.effective_duration * 0.5)
+                d = max(d, 0.1)
+                offset = round(accumulated_dur - d, 3)
+
+                xf_v = f"xfv{i}"
+                xf_a = f"xfa{i}"
+
+                filters.append(
+                    f"[{current_v}][{v_labels[i]}]xfade=transition=fade:duration={d}:offset={offset}[{xf_v}]"
+                )
+                filters.append(
+                    f"[{current_a}][{a_labels[i]}]acrossfade=d={d}[{xf_a}]"
+                )
+
+                current_v = xf_v
+                current_a = xf_a
+                accumulated_dur = offset + clip.effective_duration
+            else:
+                # No crossfade — concat this pair
+                pair_v = f"pv{i}"
+                pair_a = f"pa{i}"
+                filters.append(
+                    f"[{current_v}][{current_a}][{v_labels[i]}][{a_labels[i]}]"
+                    f"concat=n=2:v=1:a=1[{pair_v}][{pair_a}]"
+                )
+                current_v = pair_v
+                current_a = pair_a
+                accumulated_dur += clip.effective_duration
+
+        # Rename final labels
+        filters.append(f"[{current_v}]null[outv]")
+        filters.append(f"[{current_a}]anull[outa]")
 
         # Mix in background music if present
         out_a = "outa"
@@ -136,16 +229,13 @@ class FFmpegCommandBuilder:
         if not music or not music.source:
             return "outa"
 
-        # Music source might be an additional input
         if music.source not in source_index:
-            # We'd need to add it as a separate input — for now skip
             log.warning("Music source %s not in inputs, skipping", music.source)
             return "outa"
 
         idx = source_index[music.source]
         total_dur = self.timeline.total_duration()
 
-        # Trim music to total duration, apply volume and fades
         music_chain = f"[{idx}:a]atrim=0:{total_dur},asetpts=PTS-STARTPTS"
         music_chain += f",volume={music.volume}"
         if music.fade_in > 0:
@@ -155,6 +245,5 @@ class FFmpegCommandBuilder:
         music_chain += "[music]"
         filters.append(music_chain)
 
-        # Mix speech audio with music
         filters.append("[outa][music]amix=inputs=2:duration=first[mixed]")
         return "mixed"
