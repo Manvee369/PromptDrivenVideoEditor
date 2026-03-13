@@ -135,20 +135,28 @@ def _filter_by_region(
 def _select_for_budget(
     pool: list[dict], budget: float, used_ranges: list[tuple]
 ) -> list[dict]:
-    """Select segments from pool that fit within duration budget, avoiding overlaps."""
+    """Select segments from pool that fit within duration budget, avoiding overlaps.
+    Trims segments that are longer than remaining budget rather than skipping them."""
     selected = []
     remaining = budget
 
     for seg in pool:
-        if seg["duration"] > remaining:
-            continue
         if _overlaps(seg, used_ranges):
             continue
 
-        selected.append(seg)
-        remaining -= seg["duration"]
+        dur = seg["duration"]
+        if dur <= remaining:
+            selected.append(seg)
+            remaining -= dur
+        elif remaining >= 2.0:
+            # Trim the segment to fit the remaining budget
+            trimmed = dict(seg)
+            trimmed["end"] = round(seg["start"] + remaining, 3)
+            trimmed["duration"] = round(remaining, 3)
+            selected.append(trimmed)
+            remaining = 0
 
-        if remaining <= 0.5:
+        if remaining < 0.5:
             break
 
     return selected

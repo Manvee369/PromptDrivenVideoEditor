@@ -123,20 +123,31 @@ def select_highlights(
     return candidates
 
 
-def _get_shots(shots_data: dict, filename: str, duration: float) -> list[dict]:
-    """Get shot list for a file. Falls back to fixed-length windows."""
+def _get_shots(shots_data: dict, filename: str, duration: float, max_window: float = 5.0) -> list[dict]:
+    """Get shot list for a file. Subdivides long shots into smaller windows."""
+    raw_shots = []
     for track in shots_data.get("tracks", []):
         if track["source"] == filename:
-            return track.get("shots", [])
-    # Fallback: create 3-second windows
+            raw_shots = track.get("shots", [])
+            break
+
+    # If no shots found, create windows from scratch
+    if not raw_shots:
+        raw_shots = [{"start": 0.0, "end": duration}]
+
+    # Subdivide any shot longer than max_window into smaller chunks
     windows = []
-    t = 0.0
     i = 0
-    while t < duration:
-        end = min(t + 3.0, duration)
-        windows.append({"start": t, "end": end, "index": i})
-        t = end
-        i += 1
+    for shot in raw_shots:
+        t = shot["start"]
+        shot_end = shot["end"]
+        while t < shot_end:
+            end = min(t + max_window, shot_end)
+            if end - t >= 1.0:  # skip tiny leftover fragments
+                windows.append({"start": t, "end": end, "index": i})
+                i += 1
+            t = end
+
     return windows
 
 

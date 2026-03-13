@@ -1,4 +1,8 @@
-"""Face detection using MediaPipe."""
+"""Face detection using MediaPipe Tasks API."""
+
+import os
+import urllib.request
+from pathlib import Path
 
 import cv2
 import mediapipe as mp
@@ -8,7 +12,20 @@ from app.storage.storage_manager import StorageManager
 
 log = get_logger(__name__)
 
-mp_face_detection = mp.solutions.face_detection
+MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models"
+MODEL_PATH = MODEL_DIR / "blaze_face_short_range.tflite"
+
+
+def _ensure_model() -> str:
+    """Download the face detection model if not cached."""
+    if MODEL_PATH.exists():
+        return str(MODEL_PATH)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    log.info("Downloading face detection model...")
+    urllib.request.urlretrieve(MODEL_URL, str(MODEL_PATH))
+    log.info("Model saved to %s", MODEL_PATH)
+    return str(MODEL_PATH)
 
 
 def detect_faces(storage: StorageManager, sample_fps: float = 2.0) -> dict:
@@ -31,30 +48,38 @@ def detect_faces(storage: StorageManager, sample_fps: float = 2.0) -> dict:
       ]
     }
     """
+    model_path = _ensure_model()
     manifest = storage.load_signal("media_manifest")
     tracks = []
 
-    for file_info in manifest["files"]:
-        if file_info.get("width", 0) == 0:
-            continue
+    BaseOptions = mp.tasks.BaseOptions
+    FaceDetector = mp.tasks.vision.FaceDetector
+    FaceDetectorOptions = mp.tasks.vision.FaceDetectorOptions
 
-        proxy_path = file_info.get("proxy_path")
-        video_path = proxy_path or file_info["raw_path"]
-        log.info("Detecting faces: %s", file_info["filename"])
+    options = FaceDetectorOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        min_detection_confidence=0.5,
+    )
 
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            log.error("Cannot open video: %s", video_path)
-            continue
+    with FaceDetector.create_from_options(options) as detector:
+        for file_info in manifest["files"]:
+            if file_info.get("width", 0) == 0:
+                continue
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_skip = max(1, int(fps / sample_fps))
-        detections = []
-        frame_idx = 0
+            proxy_path = file_info.get("proxy_path")
+            video_path = proxy_path or file_info["raw_path"]
+            log.info("Detecting faces: %s", file_info["filename"])
 
-        with mp_face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.5
-        ) as face_det:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                log.error("Cannot open video: %s", video_path)
+                continue
+
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_skip = max(1, int(fps / sample_fps))
+            detections = []
+            frame_idx = 0
+
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -63,21 +88,25 @@ def detect_faces(storage: StorageManager, sample_fps: float = 2.0) -> dict:
                 if frame_idx % frame_skip == 0:
                     time_sec = frame_idx / fps
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    results = face_det.process(rgb)
+                    mp_image = mp.Image(
+                        image_format=mp.ImageFormat.SRGB, data=rgb
+                    )
+                    results = detector.detect(mp_image)
 
                     boxes = []
                     max_conf = 0.0
-                    if results.detections:
-                        for det in results.detections:
-                            bb = det.location_data.relative_bounding_box
-                            conf = det.score[0]
-                            max_conf = max(max_conf, conf)
-                            boxes.append({
-                                "x": round(bb.xmin, 3),
-                                "y": round(bb.ymin, 3),
-                                "w": round(bb.width, 3),
-                                "h": round(bb.height, 3),
-                            })
+                    for det in results.detections:
+                        bb = det.bounding_box
+                        conf = det.categories[0].score
+                        max_conf = max(max_conf, conf)
+                        # Normalize box to relative coords
+                        img_h, img_w = frame.shape[:2]
+                        boxes.append({
+                            "x": round(bb.origin_x / img_w, 3),
+                            "y": round(bb.origin_y / img_h, 3),
+                            "w": round(bb.width / img_w, 3),
+                            "h": round(bb.height / img_h, 3),
+                        })
 
                     detections.append({
                         "time": round(time_sec, 3),
@@ -88,16 +117,16 @@ def detect_faces(storage: StorageManager, sample_fps: float = 2.0) -> dict:
 
                 frame_idx += 1
 
-        cap.release()
+            cap.release()
 
-        # Group into face regions (consecutive frames with faces)
-        face_regions = _find_face_regions(detections)
+            # Group into face regions (consecutive frames with faces)
+            face_regions = _find_face_regions(detections)
 
-        tracks.append({
-            "source": file_info["filename"],
-            "detections": detections,
-            "face_regions": face_regions,
-        })
+            tracks.append({
+                "source": file_info["filename"],
+                "detections": detections,
+                "face_regions": face_regions,
+            })
 
     faces_data = {"tracks": tracks}
     storage.save_signal("faces", faces_data)
