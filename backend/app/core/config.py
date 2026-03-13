@@ -33,9 +33,8 @@ class Settings(BaseSettings):
     diarization_enabled: bool = True
     diarization_max_speakers: int = 6
 
-    # LLM Planner
+    # LLM Planner (Groq)
     llm_api_key: str = ""
-    llm_provider: str = "groq"          # "groq", "openai", or "anthropic"
     llm_model: str = "openai/gpt-oss-120b"
     llm_planner_enabled: bool = True
 

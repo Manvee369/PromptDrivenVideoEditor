@@ -1,6 +1,6 @@
-"""LLM-based planner — uses OpenAI or Anthropic API for smarter prompt understanding.
+"""LLM-based planner — uses Groq API for smarter prompt understanding.
 
-Falls back to rule-based planner if no API key or LLM call fails.
+Falls back to rule-based planner if API call fails.
 Uses raw HTTP requests to avoid SDK dependencies.
 """
 
@@ -70,25 +70,18 @@ ASPECT_DIMENSIONS = {
 
 def llm_plan_edit(prompt: str, signals: dict) -> dict | None:
     """
-    Call LLM API to produce a structured editing plan.
+    Call Groq API to produce a structured editing plan.
 
     Returns the plan dict or None if the call fails.
     """
     if not settings.llm_api_key:
         return None
 
-    # Build media summary (don't send raw signals to LLM)
     summary = _build_media_summary(signals)
     user_message = f"User prompt: {prompt}\n\nMedia analysis:\n{summary}"
 
     try:
-        if settings.llm_provider == "anthropic":
-            response = _call_anthropic(user_message)
-        elif settings.llm_provider == "groq":
-            response = _call_groq(user_message)
-        else:
-            response = _call_openai(user_message)
-
+        response = _call_groq(user_message)
         if not response:
             return None
 
@@ -143,7 +136,7 @@ def _build_media_summary(signals: dict) -> str:
 
 
 def _call_groq(user_message: str) -> str | None:
-    """Call Groq API (OpenAI-compatible)."""
+    """Call Groq API (OpenAI-compatible endpoint)."""
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={
@@ -170,65 +163,8 @@ def _call_groq(user_message: str) -> str | None:
     return data["choices"][0]["message"]["content"]
 
 
-def _call_openai(user_message: str) -> str | None:
-    """Call OpenAI chat completions API."""
-    resp = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {settings.llm_api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": settings.llm_model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 800,
-        },
-        timeout=30,
-    )
-
-    if resp.status_code != 200:
-        log.warning("OpenAI API returned %d: %s", resp.status_code, resp.text[:200])
-        return None
-
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
-
-
-def _call_anthropic(user_message: str) -> str | None:
-    """Call Anthropic messages API."""
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": settings.llm_api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": settings.llm_model,
-            "max_tokens": 800,
-            "system": SYSTEM_PROMPT,
-            "messages": [
-                {"role": "user", "content": user_message},
-            ],
-        },
-        timeout=30,
-    )
-
-    if resp.status_code != 200:
-        log.warning("Anthropic API returned %d: %s", resp.status_code, resp.text[:200])
-        return None
-
-    data = resp.json()
-    return data["content"][0]["text"]
-
-
 def _parse_and_validate(response: str, prompt: str) -> dict | None:
     """Parse LLM response and validate the plan structure."""
-    # Extract JSON from response (handle markdown code blocks)
     text = response.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -240,16 +176,13 @@ def _parse_and_validate(response: str, prompt: str) -> dict | None:
         log.warning("LLM response is not valid JSON")
         return None
 
-    # Validate required fields
     if not isinstance(plan.get("operations"), list):
         return None
 
-    # Filter to valid operations only
     plan["operations"] = [op for op in plan["operations"] if op in VALID_OPERATIONS]
     if not plan["operations"]:
         return None
 
-    # Validate and fix style
     style = plan.get("style", {})
     aspect = style.get("aspect", "16:9")
     if aspect not in VALID_ASPECTS:
@@ -267,19 +200,15 @@ def _parse_and_validate(response: str, prompt: str) -> dict | None:
 
     plan["style"] = style
 
-    # Validate priorities
     priorities = plan.get("priorities", {})
     expected_keys = {"motion", "audio_peak", "speech", "shot_variety", "face"}
     if not all(k in priorities for k in expected_keys):
-        # Fill defaults
         priorities = {"motion": 0.30, "audio_peak": 0.25, "speech": 0.15,
                       "shot_variety": 0.15, "face": 0.15}
     plan["priorities"] = priorities
 
-    # Ensure goal exists
     plan["goal"] = plan.get("goal", prompt)
 
-    # Validate target_duration
     td = plan.get("target_duration")
     if td is not None:
         try:
