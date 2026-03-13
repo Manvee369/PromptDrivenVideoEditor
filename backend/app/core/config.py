@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
 
     # Whisper
-    whisper_model: str = "base"
+    whisper_model: str = "small"
 
     # Preprocessing
     proxy_resolution: int = 854

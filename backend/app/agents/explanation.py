@@ -43,6 +43,30 @@ def generate_explanation(
     target = plan.get("target_duration")
     planner_type = plan.get("planner", "rule_based")
 
+    # Content classification
+    classification = signals.get("classification")
+    if classification:
+        video_type = classification.get("video_type", "unknown")
+        type_conf = classification.get("video_type_confidence", 0)
+        user_intent = classification.get("user_intent", "unknown")
+        intent_conf = classification.get("user_intent_confidence", 0)
+        decisions.append({
+            "stage": "classification",
+            "detail": f"Classified video as '{video_type}' ({type_conf:.0%} confidence) "
+                      f"with user intent '{user_intent}' ({intent_conf:.0%} confidence).",
+        })
+
+    # Strategy routing
+    strategy = signals.get("strategy") or plan.get("strategy")
+    if strategy:
+        decisions.append({
+            "stage": "strategy",
+            "detail": f"Applied '{strategy.get('video_type', 'default')}' editing strategy: "
+                      f"energy={strategy.get('energy', 'medium')}, "
+                      f"story={strategy.get('story_structure', 'medium')}, "
+                      f"speaker_tags={'on' if strategy.get('caption_config', {}).get('speaker_tags') else 'off'}.",
+        })
+
     decisions.append({
         "stage": "planning",
         "detail": f"Detected operations: {', '.join(operations)}. "
@@ -51,6 +75,21 @@ def generate_explanation(
                   + (f" Target duration: {target}s." if target else "")
                   + f" Planner: {planner_type}.",
     })
+
+    # Visual scoring
+    visual_scores = signals.get("visual_scores")
+    if visual_scores:
+        for track in visual_scores.get("tracks", []):
+            kf_count = len(track.get("keyframes", []))
+            avg_prompt = track.get("avg_prompt_score", 0)
+            top_type = track.get("top_type", "unknown")
+            top_conf = track.get("top_type_confidence", 0)
+            decisions.append({
+                "stage": "visual_scoring",
+                "detail": f"Scored {kf_count} keyframes with SigLIP: "
+                          f"avg prompt relevance {avg_prompt:.2f}, "
+                          f"visual type '{top_type}' ({top_conf:.0%}).",
+            })
 
     # Intelligence stats
     transcript = signals.get("transcript", {})
@@ -205,10 +244,18 @@ def _build_summary(plan: dict, stats: dict, decisions: list) -> str:
     summary = " ".join(parts) + "."
 
     if "highlight_select" in plan.get("operations", []):
-        summary += " Highlights were selected based on motion intensity, audio peaks, speech content, and shot variety."
+        summary += " Highlights were selected based on motion intensity, audio peaks, speech content, visual relevance, and shot variety."
 
     if "add_captions" in plan.get("operations", []):
         captions = stats.get("captions", 0)
         summary += f" {captions} captions were added from the transcript."
+
+    # Mention content classification if available
+    strategy = plan.get("strategy")
+    if strategy:
+        video_type = strategy.get("video_type", "").replace("_", " ")
+        user_intent = strategy.get("user_intent", "").replace("_", " ")
+        if video_type and user_intent:
+            summary += f" Editing strategy was optimized for {video_type} content with {user_intent} intent."
 
     return summary
