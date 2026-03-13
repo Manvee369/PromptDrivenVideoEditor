@@ -1,12 +1,14 @@
 """Job pipeline orchestrator — runs all stages in sequence."""
 
 from app.agents.captions import generate_ass_file, generate_captions
+from app.agents.content_classifier import classify_content
 from app.agents.editing import build_timeline
 from app.agents.explanation import generate_explanation
 from app.agents.highlight import select_highlights
 from app.agents.music import analyze_music
 from app.agents.planner import plan_edit
 from app.agents.story import compose_story
+from app.agents.strategy_router import get_strategy
 from app.agents.thumbnail import generate_thumbnail
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -80,9 +82,20 @@ def run_pipeline(job_id: str, prompt: str) -> str:
         # Music analysis (only if music files uploaded)
         music_analysis = analyze_music(storage)
 
-        # --- Stage 3: Planning ---
+        # Visual scoring with SigLIP (if enabled)
+        visual_scores = None
+        if settings.visual_scoring_enabled:
+            _update(job_id, JobStatus.INTELLIGENCE, 0.48)
+            log.info("[%s] Stage 2: Intelligence — visual scoring (SigLIP)", job_id)
+            try:
+                from app.intelligence.visual_scoring import compute_visual_scores
+                visual_scores = compute_visual_scores(prompt, storage, shots)
+            except Exception as e:
+                log.warning("[%s] Visual scoring failed (non-fatal): %s", job_id, e)
+
+        # --- Stage 3: Classification + Planning ---
         _update(job_id, JobStatus.PLANNING, 0.50)
-        log.info("[%s] Stage 3: Planning", job_id)
+        log.info("[%s] Stage 3: Content classification", job_id)
         signals = {
             "media_manifest": manifest,
             "transcript": transcript,
@@ -93,11 +106,40 @@ def run_pipeline(job_id: str, prompt: str) -> str:
             "faces": faces,
             "diarization": diarization,
             "music_analysis": music_analysis,
+            "visual_scores": visual_scores,
         }
+
+        # Classify content type and user intent
+        classification = classify_content(prompt, signals, storage)
+        signals["classification"] = classification
+
+        # Build strategy from classification
+        strategy = get_strategy(classification, prompt)
+        signals["strategy"] = strategy
+
+        log.info("[%s] Stage 3: Planning (type=%s, intent=%s)",
+                 job_id, classification["video_type"], classification["user_intent"])
         plan = plan_edit(prompt, signals, storage)
 
+        # Merge strategy operations into plan if LLM didn't produce them
+        plan_ops = set(plan.get("operations", []))
+        strategy_ops = set(strategy.get("operations", []))
+        merged_ops = sorted(plan_ops | strategy_ops)
+        plan["operations"] = merged_ops
+
+        # Inject strategy into plan for downstream agents
+        plan["strategy"] = strategy
+
+        # Override plan energy with strategy energy if the strategy is confident
+        if classification.get("video_type_confidence", 0) > 0.4:
+            plan["style"]["energy"] = strategy["energy"]
+
+        # Override highlight weights with strategy weights
+        if strategy.get("highlight_weights"):
+            plan["priorities"] = strategy["highlight_weights"]
+
         # --- Stage 4: Agents ---
-        operations = plan.get("operations", [])
+        operations = plan["operations"]
 
         # Highlight selection (if requested)
         highlights = None
@@ -107,11 +149,12 @@ def run_pipeline(job_id: str, prompt: str) -> str:
             highlights = select_highlights(plan, signals, storage)
             signals["highlights"] = highlights
 
-        # Story composition (if requested)
+        # Story composition (if requested and narrative structure allows)
         story = None
-        if "story_compose" in operations and highlights:
+        story_structure = strategy.get("story_structure", "medium")
+        if "story_compose" in operations and highlights and story_structure != "chronological":
             _update(job_id, JobStatus.PLANNING, 0.60)
-            log.info("[%s] Stage 4: Composing story", job_id)
+            log.info("[%s] Stage 4: Composing story (structure=%s)", job_id, story_structure)
             story = compose_story(plan, highlights, storage)
             signals["story"] = story
 
@@ -120,14 +163,24 @@ def run_pipeline(job_id: str, prompt: str) -> str:
         timeline = build_timeline(plan, signals, storage)
 
         # Add captions if requested
+        caption_config = strategy.get("caption_config", {})
         if "add_captions" in operations:
-            timeline = generate_captions(timeline, signals, storage)
+            timeline = generate_captions(
+                timeline, signals, storage,
+                use_speaker_tags=caption_config.get("speaker_tags", False),
+            )
 
-            # Use animated captions for high-energy or TikTok style
-            energy = plan.get("style", {}).get("energy", "medium")
+            # Caption style from strategy
+            animated = caption_config.get("animated", False)
+            style_name = caption_config.get("style", "default")
+
+            # Fallback: high energy or vertical → animated
             aspect = plan.get("style", {}).get("aspect", "16:9")
-            animated = energy == "high" or aspect == "9:16"
-            style_name = "tiktok_bold" if aspect == "9:16" else "default"
+            if not animated:
+                energy = plan.get("style", {}).get("energy", "medium")
+                animated = energy == "high" or aspect == "9:16"
+            if style_name == "default" and aspect == "9:16":
+                style_name = "tiktok_bold"
 
             generate_ass_file(
                 timeline.captions,

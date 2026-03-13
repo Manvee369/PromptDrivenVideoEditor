@@ -27,5 +27,10 @@ Pillow
 # Transcription
 openai-whisper
 
+# Visual understanding (SigLIP)
+open-clip-torch
+torch
+torchvision
+
 # HTTP
 requests

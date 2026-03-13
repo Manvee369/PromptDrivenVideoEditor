@@ -1,4 +1,4 @@
-"""Job API routes — create, poll status, download output."""
+"""Job API routes — create, poll status, download output, analyze."""
 
 import os
 import uuid
@@ -128,3 +128,126 @@ async def get_thumbnail(job_id: str):
         media_type="image/png",
         filename=f"thumbnail_{job_id[:8]}.png",
     )
+
+
+@router.post("/analyze", summary="Analyze video before processing")
+async def analyze_content(
+    prompt: str = Form(...),
+    files: List[UploadFile] = None,
+):
+    """
+    Quick content analysis: classifies video type and user intent,
+    returns warnings if there's a mismatch.
+
+    This runs preprocessing + basic intelligence (fast) to classify
+    the content before committing to the full pipeline.
+
+    Returns:
+    {
+        "analysis_id": "temp-uuid",
+        "video_type": "talking_head",
+        "video_type_confidence": 0.82,
+        "user_intent": "highlight_reel",
+        "user_intent_confidence": 0.75,
+        "warnings": ["This looks like a talking head video..."],
+        "strategy_summary": {...}
+    }
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+
+    # Create a temporary job directory for analysis
+    analysis_id = f"analyze-{uuid.uuid4()}"
+    storage = StorageManager(analysis_id)
+    storage.ensure_dirs()
+
+    try:
+        # Save uploaded files
+        for file in files:
+            path = storage.stage_dir("raw") / file.filename
+            with open(path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+
+        # Run lightweight preprocessing
+        from app.jobs.preprocess import preprocess_media
+        manifest = preprocess_media(storage)
+
+        # Run minimal intelligence (fast signals only)
+        from app.intelligence.audio_features import detect_silence
+        from app.intelligence.shots import detect_shots
+        from app.intelligence.motion import detect_motion
+        from app.intelligence.faces import detect_faces
+
+        silence = detect_silence(storage)
+        shots = detect_shots(storage)
+        motion = detect_motion(storage)
+        faces = detect_faces(storage)
+
+        # Diarization for speaker count
+        diarization = None
+        if settings.diarization_enabled:
+            try:
+                from app.intelligence.transcribe import transcribe_media
+                from app.intelligence.diarization import diarize
+                transcribe_media(storage)
+                diarization = diarize(storage, max_speakers=settings.diarization_max_speakers)
+            except Exception:
+                pass
+
+        signals = {
+            "media_manifest": manifest,
+            "transcript": storage.load_signal("transcript") if storage.has_json("signals", "transcript") else {},
+            "silence": silence,
+            "audio_energy": {},
+            "shots": shots,
+            "motion": motion,
+            "faces": faces,
+            "diarization": diarization,
+            "visual_scores": None,
+        }
+
+        # Visual scoring if enabled
+        if settings.visual_scoring_enabled:
+            try:
+                from app.intelligence.visual_scoring import compute_visual_scores
+                visual_scores = compute_visual_scores(prompt, storage, shots)
+                signals["visual_scores"] = visual_scores
+            except Exception:
+                pass
+
+        # Classify
+        from app.agents.content_classifier import classify_content
+        from app.agents.strategy_router import get_strategy
+
+        classification = classify_content(prompt, signals, storage)
+        strategy = get_strategy(classification, prompt)
+
+        return {
+            "analysis_id": analysis_id,
+            "video_type": classification["video_type"],
+            "video_type_confidence": classification["video_type_confidence"],
+            "video_type_scores": classification["video_type_scores"],
+            "user_intent": classification["user_intent"],
+            "user_intent_confidence": classification["user_intent_confidence"],
+            "warnings": classification.get("warnings", []),
+            "strategy_summary": {
+                "operations": strategy["operations"],
+                "energy": strategy["energy"],
+                "caption_style": strategy["caption_config"]["style"],
+                "speaker_tags": strategy["caption_config"]["speaker_tags"],
+                "story_structure": strategy["story_structure"],
+            },
+        }
+
+    except Exception as e:
+        log.error("Analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+    finally:
+        # Clean up analysis files (they're temporary)
+        import shutil
+        try:
+            shutil.rmtree(storage.job_dir(), ignore_errors=True)
+        except Exception:
+            pass

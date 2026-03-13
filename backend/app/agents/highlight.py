@@ -7,11 +7,12 @@ log = get_logger(__name__)
 
 # Default scoring weights
 DEFAULT_WEIGHTS = {
-    "motion": 0.30,
-    "audio_peak": 0.25,
+    "motion": 0.25,
+    "audio_peak": 0.20,
     "speech": 0.15,
-    "shot_variety": 0.15,
-    "face": 0.15,
+    "shot_variety": 0.10,
+    "face": 0.10,
+    "visual_relevance": 0.20,
 }
 
 
@@ -36,6 +37,7 @@ def select_highlights(
     speech_w = weights.get("speech", DEFAULT_WEIGHTS["speech"])
     variety_w = weights.get("shot_variety", DEFAULT_WEIGHTS["shot_variety"])
     face_w = weights.get("face", DEFAULT_WEIGHTS["face"])
+    visual_w = weights.get("visual_relevance", DEFAULT_WEIGHTS["visual_relevance"])
 
     manifest = signals.get("media_manifest", {})
     shots_data = signals.get("shots", {})
@@ -43,6 +45,7 @@ def select_highlights(
     energy_data = signals.get("audio_energy", {})
     silence_data = signals.get("silence", {})
     faces_data = signals.get("faces", {})
+    visual_data = signals.get("visual_scores", {})
 
     candidates = []
 
@@ -59,6 +62,7 @@ def select_highlights(
         peaks = _get_peaks_lookup(energy_data, filename)
         speech_regions = _get_speech_regions(silence_data, filename)
         face_detections = _get_face_detections(faces_data, filename)
+        visual_keyframes = _get_visual_scores(visual_data, filename)
 
         for shot in shots:
             start, end = shot["start"], shot["end"]
@@ -90,12 +94,18 @@ def select_highlights(
             if variety_score > 0.5:
                 reasons.append("dynamic pacing")
 
+            # Visual relevance: SigLIP prompt-image similarity
+            visual_score = _visual_relevance_in_range(visual_keyframes, start, end)
+            if visual_score > 0.6:
+                reasons.append(f"visually relevant ({visual_score:.2f})")
+
             total_score = (
                 motion_w * motion_score
                 + audio_w * peak_score
                 + speech_w * speech_score
                 + variety_w * variety_score
                 + face_w * face_score
+                + visual_w * visual_score
             )
 
             candidates.append({
@@ -111,6 +121,7 @@ def select_highlights(
                     "speech": round(speech_score, 4),
                     "shot_variety": round(variety_score, 4),
                     "face": round(face_score, 4),
+                    "visual_relevance": round(visual_score, 4),
                 },
             })
 
@@ -177,6 +188,20 @@ def _get_face_detections(faces_data: dict, filename: str) -> list[dict]:
         if track["source"] == filename:
             return track.get("detections", [])
     return []
+
+
+def _get_visual_scores(visual_data: dict, filename: str) -> list[dict]:
+    """Get SigLIP keyframe scores for a file."""
+    for track in visual_data.get("tracks", []):
+        if track["source"] == filename:
+            return track.get("keyframes", [])
+    return []
+
+
+def _visual_relevance_in_range(keyframes: list[dict], start: float, end: float) -> float:
+    """Average prompt relevance score from SigLIP keyframes in time range."""
+    relevant = [kf["prompt_score"] for kf in keyframes if start <= kf["time"] <= end]
+    return sum(relevant) / len(relevant) if relevant else 0.5  # neutral fallback
 
 
 def _face_presence_in_range(detections: list[dict], start: float, end: float) -> float:

@@ -77,6 +77,47 @@ export async function getExplanation(jobId: string): Promise<JobExplanation> {
   return apiFetch<JobExplanation>(`/jobs/${jobId}/explanation`);
 }
 
+/* ─── Content Analysis ─────────────────────────────────────────────────── */
+
+/** Response from POST /jobs/analyze */
+export interface AnalysisResult {
+  analysis_id: string;
+  video_type: string;
+  video_type_confidence: number;
+  video_type_scores: Record<string, number>;
+  user_intent: string;
+  user_intent_confidence: number;
+  warnings: string[];
+  strategy_summary: {
+    operations: string[];
+    energy: string;
+    caption_style: string;
+    speaker_tags: boolean;
+    story_structure: string;
+  };
+}
+
+/**
+ * Quick content analysis before starting the full pipeline.
+ * Returns classification, intent, and any mismatch warnings.
+ */
+export async function analyzeContent(
+  prompt: string,
+  files: File[],
+): Promise<AnalysisResult> {
+  const form = new FormData();
+  form.append('prompt', prompt);
+  for (const file of files) {
+    form.append('files', file);
+  }
+
+  return apiFetch<AnalysisResult>('/jobs/analyze', {
+    method: 'POST',
+    body: form,
+    headers: {},
+  });
+}
+
 /**
  * Returns a direct URL to download the final rendered video.
  * Use this as an `<a href>` or `<video src>`.

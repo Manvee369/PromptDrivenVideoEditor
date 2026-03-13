@@ -51,6 +51,7 @@ def generate_captions(
     timeline: Timeline, signals: dict, storage: StorageManager,
     min_clip_duration: float = 2.0,
     min_overlap_ratio: float = 0.4,
+    use_speaker_tags: bool | None = None,
 ) -> Timeline:
     """
     Find transcript segments that overlap with each clip in the timeline,
@@ -72,8 +73,18 @@ def generate_captions(
     for track in transcript["tracks"]:
         seg_lookup[track["source"]] = track.get("segments", [])
 
-    # Build speaker lookup from diarization if available
-    speaker_lookup = _build_speaker_lookup(signals.get("diarization"))
+    # Determine if speaker tags should be used based on content type
+    if use_speaker_tags is None:
+        # Auto-detect from strategy/classification
+        strategy = signals.get("strategy", {})
+        caption_config = strategy.get("caption_config", {})
+        use_speaker_tags = caption_config.get("speaker_tags", False)
+
+    # Build speaker lookup from diarization (only if tags are enabled)
+    if use_speaker_tags:
+        speaker_lookup = _build_speaker_lookup(signals.get("diarization"))
+    else:
+        speaker_lookup = {}
 
     time_map = _build_time_map(timeline)
     captions = []
