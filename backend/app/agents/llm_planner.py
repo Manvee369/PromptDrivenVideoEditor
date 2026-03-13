@@ -30,6 +30,10 @@ Aspect ratio options: "16:9" (landscape), "9:16" (vertical/TikTok/Reels), "1:1" 
 Energy levels: "high" (fast cuts, intense), "medium" (balanced), "low" (calm, slow)
 Transition styles: "auto" (based on energy), "none" (hard cuts only)
 
+You will also receive a content classification (video type and user intent detected from signals).
+Use this to inform your plan — e.g., a talking_head with clean_up intent needs different operations
+than a sports video with highlight_reel intent.
+
 Respond with ONLY valid JSON matching this schema:
 {
   "goal": "<user's intent in one sentence>",
@@ -45,11 +49,14 @@ Respond with ONLY valid JSON matching this schema:
     "audio_peak": <0.0-1.0>,
     "speech": <0.0-1.0>,
     "shot_variety": <0.0-1.0>,
-    "face": <0.0-1.0>
+    "face": <0.0-1.0>,
+    "visual_relevance": <0.0-1.0>
   }
 }
 
 Priority weights should sum to 1.0. They control how highlights are scored.
+The "visual_relevance" priority controls how much the AI visual understanding model's
+frame-level scoring influences highlight selection.
 Infer operations even if not explicitly mentioned (e.g., "podcast clip for Twitter" implies vertical + captions + trim).
 """
 
@@ -132,6 +139,30 @@ def _build_media_summary(signals: dict) -> str:
         for t in diarization.get("tracks", []):
             lines.append(f"Speakers: {t.get('num_speakers', 1)} detected")
 
+    # Content classification (from visual + heuristic analysis)
+    classification = signals.get("classification")
+    if classification:
+        lines.append(f"\nContent classification:")
+        lines.append(f"  Video type: {classification.get('video_type', 'unknown')} "
+                     f"(confidence: {classification.get('video_type_confidence', 0):.0%})")
+        lines.append(f"  User intent: {classification.get('user_intent', 'unknown')} "
+                     f"(confidence: {classification.get('user_intent_confidence', 0):.0%})")
+        warnings = classification.get("warnings", [])
+        if warnings:
+            lines.append(f"  Warnings: {'; '.join(warnings)}")
+
+    # Transcript excerpt (first ~500 words for context)
+    transcript = signals.get("transcript", {})
+    for t in transcript.get("tracks", []):
+        full_text = t.get("full_text", "")
+        if full_text:
+            words = full_text.split()
+            excerpt = " ".join(words[:500])
+            if len(words) > 500:
+                excerpt += " ..."
+            lines.append(f"\nTranscript excerpt:\n{excerpt}")
+            break  # only first track
+
     return "\n".join(lines)
 
 
@@ -201,10 +232,10 @@ def _parse_and_validate(response: str, prompt: str) -> dict | None:
     plan["style"] = style
 
     priorities = plan.get("priorities", {})
-    expected_keys = {"motion", "audio_peak", "speech", "shot_variety", "face"}
+    expected_keys = {"motion", "audio_peak", "speech", "shot_variety", "face", "visual_relevance"}
     if not all(k in priorities for k in expected_keys):
-        priorities = {"motion": 0.30, "audio_peak": 0.25, "speech": 0.15,
-                      "shot_variety": 0.15, "face": 0.15}
+        priorities = {"motion": 0.25, "audio_peak": 0.20, "speech": 0.15,
+                      "shot_variety": 0.10, "face": 0.10, "visual_relevance": 0.20}
     plan["priorities"] = priorities
 
     plan["goal"] = plan.get("goal", prompt)

@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     llm_model: str = "openai/gpt-oss-120b"
     llm_planner_enabled: bool = True
 
+    # Visual scoring (SigLIP)
+    visual_model: str = "ViT-B-16-SigLIP"
+    visual_pretrained: str = "webli"
+    visual_sample_fps: float = 1.0  # keyframes per second for scoring
+    visual_scoring_enabled: bool = True
+
     # Logging
     log_level: str = "INFO"
 

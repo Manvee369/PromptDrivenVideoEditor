@@ -1,4 +1,10 @@
-"""Story Composer Agent — arranges highlights into chronological narrative structure.
+"""Story Composer Agent — arranges highlights into narrative structure.
+
+Supports multiple narrative structures based on content type and energy:
+- high: Hook → Build → Climax → Finale (sports, gaming, events)
+- medium: Intro → Development → Peak → Resolution (vlogs, general)
+- low: Intro → Body → Conclusion (podcasts, tutorials)
+- chronological: Simple time-ordered best segments (talking head, clean up)
 
 For sports/event content, preserves the original timeline order so the story
 builds naturally toward the climax (e.g., winner at the end).
@@ -40,6 +46,13 @@ STRUCTURES = {
             {"role": "conclusion", "pct": 0.25, "source_region": "late", "order": 2},
         ],
     },
+    "chronological": {
+        # Simple: just take the top segments and order them by time
+        # Used for talking_head, tutorial, clean_up intent
+        "segments": [
+            {"role": "content", "pct": 1.0, "source_region": "all", "order": 0},
+        ],
+    },
 }
 
 
@@ -53,9 +66,13 @@ def compose_story(
     original source timestamp, preserving the natural event timeline.
     For sports content this means the winning moment appears at the end.
     """
-    energy = plan.get("style", {}).get("energy", "medium")
+    # Use story structure from strategy if available, else fall back to energy
+    strategy = plan.get("strategy", {})
+    story_key = strategy.get("story_structure")
+    if not story_key or story_key not in STRUCTURES:
+        story_key = plan.get("style", {}).get("energy", "medium")
     target_duration = plan.get("target_duration")
-    structure = STRUCTURES.get(energy, STRUCTURES["medium"])
+    structure = STRUCTURES.get(story_key, STRUCTURES["medium"])
 
     if not highlights:
         log.warning("No highlights to compose story from")
@@ -116,7 +133,9 @@ def _filter_by_region(
     highlights: list[dict], region: str, max_time: float
 ) -> list[dict]:
     """Filter highlights by which region of the source video they come from."""
-    if region == "early":
+    if region == "all":
+        return list(highlights)
+    elif region == "early":
         return [h for h in highlights if h["start"] < max_time * 0.30]
     elif region == "mid":
         return [h for h in highlights if max_time * 0.20 <= h["start"] < max_time * 0.70]

@@ -80,7 +80,7 @@ def build_timeline(plan: dict, signals: dict, storage: StorageManager) -> Timeli
         for clip in clips:
             clip.filters.append("colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3")
 
-    # Apply transitions
+    # Apply transitions (strategy-aware)
     if "add_transitions" in operations:
         clips = _apply_transitions(clips, plan)
 
@@ -165,9 +165,9 @@ def _beat_sync_clips(clips: list[ClipRef], beats: list[float]) -> list[ClipRef]:
         nearest_idx = int(np.argmin(np.abs(beats_arr - target_end)))
         beat_end = float(beats_arr[nearest_idx])
 
-        # Only adjust if the shift is small (< 0.5s)
+        # Only adjust if the shift is small (< 0.25s) for tighter beat sync
         adjusted_duration = beat_end - output_cursor
-        if adjusted_duration > 0.5 and abs(adjusted_duration - duration) < 0.5:
+        if adjusted_duration > 0.5 and abs(adjusted_duration - duration) < 0.25:
             # Adjust the source end time
             new_end = clip.start + (adjusted_duration * clip.speed)
             synced.append(ClipRef(
@@ -195,15 +195,20 @@ def _get_speech_regions(silence_data: dict, filename: str) -> list[dict]:
 
 
 def _apply_transitions(clips: list[ClipRef], plan: dict) -> list[ClipRef]:
-    """Assign transition types between clips based on plan energy/style."""
+    """Assign transition types between clips based on strategy/energy."""
     if len(clips) <= 1:
         return clips
 
-    energy = plan.get("style", {}).get("energy", "medium")
-    transition_style = plan.get("style", {}).get("transitions", "auto")
+    strategy = plan.get("strategy", {})
+    transition_config = strategy.get("transition_config", {})
+    energy = transition_config.get("energy", plan.get("style", {}).get("energy", "medium"))
+    transition_style = transition_config.get("style", plan.get("style", {}).get("transitions", "auto"))
 
     if transition_style == "none":
         return clips
+
+    # Get crossfade duration from strategy or use defaults
+    crossfade_dur = transition_config.get("crossfade_duration")
 
     for i, clip in enumerate(clips):
         if i == 0:
@@ -212,22 +217,28 @@ def _apply_transitions(clips: list[ClipRef], plan: dict) -> list[ClipRef]:
             clip.transition_duration = 0.5
             continue
 
-        if energy == "high":
+        if transition_style == "minimal":
+            # Minimal: simple cuts with occasional crossfade
+            if i % 5 == 0:
+                clip.transition_in = "crossfade"
+                clip.transition_duration = crossfade_dur or 0.5
+            # else: hard cut (no transition)
+        elif energy == "high" or transition_style == "dynamic":
             # High energy: alternate between crossfade and flash
             if i % 4 == 0:
                 clip.transition_in = "flash"
                 clip.transition_duration = 0.2
             else:
                 clip.transition_in = "crossfade"
-                clip.transition_duration = 0.3
+                clip.transition_duration = crossfade_dur or 0.3
         elif energy == "low":
             # Low energy: smooth crossfades
             clip.transition_in = "crossfade"
-            clip.transition_duration = 0.8
+            clip.transition_duration = crossfade_dur or 0.8
         else:
             # Medium: standard crossfades
             clip.transition_in = "crossfade"
-            clip.transition_duration = 0.5
+            clip.transition_duration = crossfade_dur or 0.5
 
     return clips
 

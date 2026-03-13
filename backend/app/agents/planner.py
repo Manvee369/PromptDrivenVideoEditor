@@ -113,11 +113,11 @@ def _rule_based_plan(prompt: str, signals: dict) -> dict:
         energy = "low"
 
     if energy == "high":
-        priorities = {"motion": 0.35, "audio_peak": 0.25, "speech": 0.10, "shot_variety": 0.15, "face": 0.15}
+        priorities = {"motion": 0.30, "audio_peak": 0.20, "speech": 0.05, "shot_variety": 0.10, "face": 0.10, "visual_relevance": 0.25}
     elif energy == "low":
-        priorities = {"motion": 0.10, "audio_peak": 0.15, "speech": 0.35, "shot_variety": 0.15, "face": 0.25}
+        priorities = {"motion": 0.05, "audio_peak": 0.10, "speech": 0.30, "shot_variety": 0.10, "face": 0.20, "visual_relevance": 0.25}
     else:
-        priorities = {"motion": 0.30, "audio_peak": 0.25, "speech": 0.15, "shot_variety": 0.15, "face": 0.15}
+        priorities = {"motion": 0.25, "audio_peak": 0.20, "speech": 0.15, "shot_variety": 0.10, "face": 0.10, "visual_relevance": 0.20}
 
     return {
         "goal": prompt,
