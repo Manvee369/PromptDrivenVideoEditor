@@ -112,7 +112,7 @@ class FFmpegCommandBuilder:
             v_chain += (
                 f",scale={w}:{h}:force_original_aspect_ratio=decrease"
                 f",pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
-                f",setsar=1"
+                f",setsar=1,fps={self.fmt.fps},settb=AVTB"
             )
 
             # Per-clip fade/flash transitions (non-crossfade)
