@@ -190,8 +190,10 @@ def _get_face_detections(faces_data: dict, filename: str) -> list[dict]:
     return []
 
 
-def _get_visual_scores(visual_data: dict, filename: str) -> list[dict]:
+def _get_visual_scores(visual_data: dict | None, filename: str) -> list[dict]:
     """Get SigLIP keyframe scores for a file."""
+    if not visual_data:
+        return []
     for track in visual_data.get("tracks", []):
         if track["source"] == filename:
             return track.get("keyframes", [])
