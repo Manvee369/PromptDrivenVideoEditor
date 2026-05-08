@@ -40,6 +40,9 @@ services:
       PDVE_QUEUE_ENABLED: "true"
       PDVE_REDIS_URL: "redis://redis:6379/0"
       PDVE_STORAGE_BASE: "/app/storage/jobs"
+      MPLCONFIGDIR: "/tmp/matplotlib"
+      HF_HOME: "/tmp/huggingface"
+      TORCH_HOME: "/tmp/torch"
     ports:
       - "8000:8000"
     healthcheck:
@@ -66,6 +69,9 @@ services:
       PDVE_QUEUE_ENABLED: "true"
       PDVE_REDIS_URL: "redis://redis:6379/0"
       PDVE_STORAGE_BASE: "/app/storage/jobs"
+      MPLCONFIGDIR: "/tmp/matplotlib"
+      HF_HOME: "/tmp/huggingface"
+      TORCH_HOME: "/tmp/torch"
       # CPU-optimised settings (offloading to Azure Speech API)
       PDVE_WHISPER_MODEL: "medium"
       PDVE_WHISPER_DEVICE: "cpu"

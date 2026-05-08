@@ -11,8 +11,7 @@ Two-stage flow:
        fails, we silently keep faster-whisper's word timestamps.
 """
 
-from __future__ import annotations
-
+from pathlib import Path
 from typing import Any
 
 from faster_whisper import WhisperModel
