@@ -1,10 +1,49 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Backend runtime artifacts
 backend/storage/
+backend/models/
 uploads/
 processed/
+
+# Secrets — never commit
 .env
 **/.env
-backend/models/
+.env.local
+.env.production
+.env.*.local
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# IDE / OS
+.claude/
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Video / audio files (large binary artifacts)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+
+# Azure / deployment secrets
+azure/secrets/

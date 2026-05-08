@@ -12,7 +12,15 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
 
     # Whisper
-    whisper_model: str = "small"
+    # Default upgraded from "small" → "medium" for noticeably better
+    # transcription on accented/noisy speech. ~3x slower on CPU but
+    # caption text quality is the most user-visible AI output. Override
+    # via PDVE_WHISPER_MODEL=small to revert.
+    whisper_model: str = "medium"
+    # When True, run WhisperX wav2vec2 forced alignment on top of
+    # faster-whisper's output for tighter word-level timing. Falls back to
+    # faster-whisper's word_timestamps if WhisperX import or alignment fails.
+    use_whisperx_alignment: bool = True
 
     # Preprocessing
     proxy_resolution: int = 854
@@ -46,6 +54,62 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
+
+    # --- Ingress hardening (Phase 2) ---
+
+    # Comma-separated CORS origin allowlist. "*" disables the allowlist
+    # (development only — never use in production).
+    allowed_origins_csv: str = "http://localhost:3000"
+
+    # Per-file upload size cap. Default 2 GB. Files larger than this are
+    # rejected mid-stream so we never buffer a giant upload in memory.
+    max_upload_bytes: int = 2 * 1024 * 1024 * 1024
+
+    # Per-request file count cap.
+    max_files_per_job: int = 20
+
+    # Streaming-read chunk size when saving uploads.
+    upload_chunk_size: int = 1024 * 1024  # 1 MB
+
+    # If True, /jobs/{id}/download and /jobs/{id}/thumbnail require a
+    # ?token=... query param matching the job's download_token. The token
+    # is returned at job creation. Set False for local dev convenience.
+    download_token_required: bool = True
+
+    # --- Audio output ---
+    # EBU R128 loudness normalization on final render. -14 LUFS is the
+    # de-facto target for streaming/social platforms. Set to 0 to disable.
+    loudnorm_target_lufs: float = -14.0
+    loudnorm_target_lra: float = 11.0          # loudness range
+    loudnorm_target_tp: float = -1.5           # true peak ceiling
+
+    # Tiny audio crossfade applied at every clip boundary so cuts don't click.
+    # 50ms is inaudible as a fade but smooths waveform discontinuities.
+    audio_cut_smooth_seconds: float = 0.05
+
+    # --- Job queue (RQ + Redis) ---
+    # When queue_enabled and Redis is reachable, /jobs/ enqueues to RQ and a
+    # separate worker process runs the pipeline. Otherwise we fall back to
+    # FastAPI BackgroundTasks (in-process, single-job-at-a-time).
+    queue_enabled: bool = False
+    redis_url: str = "redis://localhost:6379/0"
+    queue_name: str = "pipeline"
+    # Per-job worker timeout (10 min default). Long renders may need a higher value.
+    queue_job_timeout: int = 600
+
+    # --- Disk janitor ---
+    # Periodically remove intermediate artifacts (prep/, render/, signals/)
+    # for completed jobs aged past the threshold. Safe — does not delete the
+    # raw uploads, the DSL, or the final outputs. Re-running the pipeline
+    # regenerates everything cleanly.
+    janitor_enabled: bool = True
+    janitor_max_age_hours: int = 24       # clean jobs older than this when COMPLETED
+    janitor_interval_minutes: int = 60    # sweep cadence
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Parse CSV into a list. Empty entries dropped."""
+        return [o.strip() for o in self.allowed_origins_csv.split(",") if o.strip()]
 
     model_config = {"env_prefix": "PDVE_", "env_file": ".env", "env_file_encoding": "utf-8"}
 

@@ -6,12 +6,14 @@ import { getVideoUrl } from '@/lib/api';
 
 interface VideoPlayerProps {
   jobId: string;
+  /** Per-job download token, required when backend has token enforcement on. */
+  token?: string;
   className?: string;
   /** Subtitles track URL (e.g. a .vtt file). Optional. */
   captionsUrl?: string;
 }
 
-export function VideoPlayer({ jobId, className, captionsUrl }: VideoPlayerProps) {
+export function VideoPlayer({ jobId, token, className, captionsUrl }: VideoPlayerProps) {
   const videoRef   = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying]   = useState(false);
   const [muted,   setMuted]     = useState(false);
@@ -20,7 +22,7 @@ export function VideoPlayer({ jobId, className, captionsUrl }: VideoPlayerProps)
   const [current,  setCurrent]  = useState(0);
   const [captions, setCaptions] = useState(false);
 
-  const videoSrc = getVideoUrl(jobId);
+  const videoSrc = getVideoUrl(jobId, token);
 
   /* ─── Sync state from native video ───────────────────────────────────── */
   useEffect(() => {

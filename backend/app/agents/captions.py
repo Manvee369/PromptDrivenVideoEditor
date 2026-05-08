@@ -13,11 +13,14 @@ from app.storage.storage_manager import StorageManager
 log = get_logger(__name__)
 
 # ASS style definitions
+# Adding a new preset? List it in STYLE_PRESETS at the bottom too so the
+# /jobs/ form-field validator and the frontend dropdown can find it.
 STYLES = {
     "default": {
         "fontname": "Arial",
         "fontsize_pct": 0.045,
         "primary": "&H00FFFFFF",
+        "secondary": "&H000000FF",     # red — used by \k karaoke highlight
         "outline": "&H00000000",
         "bold": -1,
         "outline_width": 3,
@@ -29,6 +32,7 @@ STYLES = {
         "fontname": "Arial",
         "fontsize_pct": 0.065,
         "primary": "&H00FFFFFF",
+        "secondary": "&H000000FF",
         "outline": "&H00000000",
         "bold": -1,
         "outline_width": 4,
@@ -36,7 +40,62 @@ STYLES = {
         "alignment": 5,
         "margin_v_pct": 0.02,
     },
+    "karaoke": {
+        # Word-level synced captions with vibrant highlight (yellow)
+        "fontname": "Arial",
+        "fontsize_pct": 0.07,
+        "primary": "&H00FFFFFF",
+        "secondary": "&H0000FFFF",     # yellow highlight as words pop
+        "outline": "&H00000000",
+        "bold": -1,
+        "outline_width": 4,
+        "shadow": 0,
+        "alignment": 5,
+        "margin_v_pct": 0.04,
+    },
+    "minimal": {
+        "fontname": "Arial",
+        "fontsize_pct": 0.035,
+        "primary": "&H00FFFFFF",
+        "secondary": "&H000000FF",
+        "outline": "&H80000000",     # semi-transparent black outline
+        "bold": 0,
+        "outline_width": 1,
+        "shadow": 0,
+        "alignment": 2,
+        "margin_v_pct": 0.06,
+    },
+    "news_lower_third": {
+        "fontname": "Arial",
+        "fontsize_pct": 0.04,
+        "primary": "&H00FFFFFF",
+        "secondary": "&H000000FF",
+        "outline": "&H00000000",
+        "bold": -1,
+        "outline_width": 2,
+        "shadow": 2,
+        "alignment": 2,
+        "margin_v_pct": 0.12,
+    },
+    "dramatic": {
+        "fontname": "Arial",
+        "fontsize_pct": 0.075,
+        "primary": "&H00FFFFFF",
+        "secondary": "&H000000FF",
+        "outline": "&H00000000",
+        "bold": -1,
+        "outline_width": 5,
+        "shadow": 3,
+        "alignment": 5,
+        "margin_v_pct": 0.04,
+    },
 }
+
+# Public preset names — ordered for UI display.
+STYLE_PRESETS: list[str] = [
+    "default", "tiktok_bold", "karaoke",
+    "minimal", "news_lower_third", "dramatic",
+]
 
 HYPE_WORDS = {
     "amazing", "insane", "crazy", "fire", "best", "worst", "never", "always",
@@ -131,10 +190,25 @@ def generate_captions(
                 speaker = _get_speaker(speaker_lookup, source, seg["start"])
                 if speaker:
                     text = f"[{speaker}] {text}"
+
+                # Carry word-level timestamps mapped to output-timeline coords.
+                # Used by karaoke captions for true-to-audio word highlighting.
+                out_words: list[dict] = []
+                for w in seg.get("words") or []:
+                    if w["start"] < overlap_start or w["end"] > overlap_end:
+                        continue
+                    out_words.append({
+                        "start": round(out_start + (w["start"] - src_start) / speed, 3),
+                        "end": round(out_start + (w["end"] - src_start) / speed, 3),
+                        "text": str(w.get("text") or w.get("word") or "").strip(),
+                        "probability": float(w.get("probability", 1.0)),
+                    })
+
                 captions.append(CaptionEntry(
                     start=round(cap_out_start, 3),
                     end=round(cap_out_end, 3),
                     text=text,
+                    words=out_words or None,
                 ))
 
     # Remove duplicates then resolve overlapping captions
@@ -218,16 +292,21 @@ def generate_ass_file(
     height: int = 1080,
     style_name: str = "default",
     animated: bool = False,
+    beats: list[float] | None = None,
 ) -> Path:
     """
     Convert CaptionEntry list to ASS subtitle file.
 
     Args:
         animated: If True, generate word-by-word animated captions (TikTok style).
+        beats: Optional list of beat timestamps (output-timeline seconds). When
+            present, karaoke-style captions add a scale-pulse on words that
+            fall on a beat for music-video punch.
     """
     style_def = STYLES.get(style_name, STYLES["default"])
     fontsize = int(height * style_def["fontsize_pct"])
     margin_v = int(height * style_def["margin_v_pct"])
+    secondary = style_def.get("secondary", "&H000000FF")
 
     header = f"""[Script Info]
 Title: Video Captions
@@ -238,7 +317,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style_def['fontname']},{fontsize},{style_def['primary']},&H000000FF,{style_def['outline']},&H80000000,{style_def['bold']},0,0,0,100,100,0,0,1,{style_def['outline_width']},{style_def['shadow']},{style_def['alignment']},20,20,{margin_v},1
+Style: Default,{style_def['fontname']},{fontsize},{style_def['primary']},{secondary},{style_def['outline']},&H80000000,{style_def['bold']},0,0,0,100,100,0,0,1,{style_def['outline_width']},{style_def['shadow']},{style_def['alignment']},20,20,{margin_v},1
 Style: Highlight,{style_def['fontname']},{int(fontsize * 1.15)},&H0000FFFF,&H000000FF,{style_def['outline']},&H80000000,-1,0,0,0,100,100,0,0,1,{style_def['outline_width']},{style_def['shadow']},{style_def['alignment']},20,20,{margin_v},1
 
 [Events]
@@ -246,7 +325,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
 
     lines = [header.strip()]
 
-    if animated:
+    # Karaoke style takes priority — uses real word-level timestamps from
+    # the CaptionEntry.words list, falls back to even-split if absent.
+    if style_name == "karaoke":
+        lines.extend(_generate_karaoke_lines(captions, beats=beats))
+    elif animated:
         lines.extend(_generate_animated_lines(captions))
     else:
         lines.extend(_generate_static_lines(captions))
@@ -267,6 +350,104 @@ def _generate_static_lines(captions: list[CaptionEntry]) -> list[str]:
         text = _escape_ass(cap.text)
         lines.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{text}")
     return lines
+
+
+def _generate_karaoke_lines(
+    captions: list[CaptionEntry],
+    beats: list[float] | None = None,
+) -> list[str]:
+    """ASS karaoke captions — words highlight in real time via \\k tags.
+
+    Uses CaptionEntry.words (output-timeline coords) for tight, true-to-audio
+    sync. When .words is missing, falls back to even-split per word so the
+    style still works when WhisperX isn't available.
+
+    Beat-sync: words whose start falls within ~80ms of a music beat get an
+    additional scale-pulse, giving captions a music-video feel.
+
+    HYPE_WORDS get an inline color shift to make them pop on top of any
+    other animations.
+    """
+    beat_set = sorted(beats) if beats else []
+    BEAT_WINDOW = 0.08  # ±80ms is the perceptual sync window
+
+    def is_on_beat(t: float) -> bool:
+        if not beat_set:
+            return False
+        # Bisect for the nearest beat
+        from bisect import bisect_left
+        i = bisect_left(beat_set, t)
+        candidates = []
+        if i < len(beat_set):
+            candidates.append(beat_set[i])
+        if i > 0:
+            candidates.append(beat_set[i - 1])
+        return any(abs(c - t) <= BEAT_WINDOW for c in candidates)
+
+    lines = []
+    for cap in captions:
+        start_ts = _seconds_to_ass_time(cap.start)
+        end_ts = _seconds_to_ass_time(cap.end)
+
+        words = cap.words or _even_split_words(cap)
+        if not words:
+            continue
+
+        parts: list[str] = []
+        for w in words:
+            # ASS \k duration is in centiseconds (1/100 sec). Minimum 1 to
+            # avoid \k0 which suppresses the word entirely.
+            dur_cs = max(1, int(round((w["end"] - w["start"]) * 100)))
+            word_text = _escape_ass(w["text"])
+
+            clean = w["text"].strip(".,!?;:\"'").lower()
+            on_beat = is_on_beat(w["start"])
+            is_hype = clean in HYPE_WORDS
+
+            if is_hype and on_beat:
+                # Big scale + color override on beat-aligned hype words
+                parts.append(
+                    f"{{\\k{dur_cs}\\c&H00FFFF&\\fscx135\\fscy135"
+                    f"\\t(0,150,\\fscx115\\fscy115)}}{word_text} "
+                    f"{{\\fscx100\\fscy100\\c&HFFFFFF&}}"
+                )
+            elif on_beat:
+                # Pulse scale on beat-aligned words
+                parts.append(
+                    f"{{\\k{dur_cs}\\fscx120\\fscy120"
+                    f"\\t(0,150,\\fscx100\\fscy100)}}{word_text} "
+                )
+            elif is_hype:
+                parts.append(
+                    f"{{\\k{dur_cs}\\c&H00FFFF&\\fscx115\\fscy115}}{word_text} "
+                    f"{{\\fscx100\\fscy100\\c&HFFFFFF&}}"
+                )
+            else:
+                parts.append(f"{{\\k{dur_cs}}}{word_text} ")
+
+        text = "".join(parts).rstrip()
+        lines.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{text}")
+
+    return lines
+
+
+def _even_split_words(cap: CaptionEntry) -> list[dict]:
+    """Fallback word timing when WhisperX/Whisper word data isn't present.
+    Splits the caption text evenly across the caption duration."""
+    tokens = cap.text.strip().split()
+    if not tokens:
+        return []
+    duration = max(0.1, cap.end - cap.start)
+    per = duration / len(tokens)
+    return [
+        {
+            "start": cap.start + i * per,
+            "end": cap.start + (i + 1) * per,
+            "text": tok,
+            "probability": 1.0,
+        }
+        for i, tok in enumerate(tokens)
+    ]
 
 
 def _generate_animated_lines(captions: list[CaptionEntry]) -> list[str]:

@@ -4,11 +4,16 @@ Extracts keyframes from shot boundaries, computes:
 1. Text-image similarity scores (prompt relevance per keyframe)
 2. Zero-shot video type classification from sampled frames
 
+Keyframe decoding (cv2 seek + read) is I/O bound and runs in a thread pool,
+overlapping with SigLIP inference on prior frames. The model itself stays
+serial — PyTorch on CPU holds the GIL during inference.
+
 Outputs saved to signals/visual_scores.json.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -113,6 +118,30 @@ def _extract_keyframe(video_path: str, time_sec: float) -> np.ndarray | None:
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
+def _extract_keyframes_parallel(
+    video_path: str,
+    times: list[float],
+    max_workers: int = 4,
+) -> list[tuple[float, np.ndarray | None]]:
+    """Extract multiple keyframes from a video in parallel.
+
+    Each thread opens its own VideoCapture, so there's no shared mutable
+    state. Returns (time, frame_rgb_or_None) tuples in the same order as
+    the input timestamps.
+    """
+    if not times:
+        return []
+
+    workers = min(max_workers, len(times))
+
+    def extract(t: float) -> tuple[float, np.ndarray | None]:
+        return (t, _extract_keyframe(video_path, t))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        # pool.map preserves input order — exactly what we want.
+        return list(pool.map(extract, times))
+
+
 def _get_keyframe_times(shots_data: dict, filename: str, duration: float) -> list[float]:
     """Get keyframe timestamps: middle of each shot, or uniform sampling."""
     for track in shots_data.get("tracks", []):
@@ -202,8 +231,11 @@ def compute_visual_scores(
         type_score_accum = np.zeros(len(VIDEO_TYPE_LABELS))
         valid_frames = 0
 
-        for t in keyframe_times:
-            frame_rgb = _extract_keyframe(video_path, t)
+        # Decode all keyframes in parallel — this is the I/O-heavy part. The
+        # subsequent model inference stays serial since PyTorch holds the GIL.
+        extracted = _extract_keyframes_parallel(video_path, keyframe_times)
+
+        for t, frame_rgb in extracted:
             if frame_rgb is None:
                 continue
 

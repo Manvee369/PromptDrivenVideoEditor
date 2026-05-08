@@ -5,7 +5,7 @@ Phase 2: supports highlight-based clip selection, story structure, and beat sync
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.dsl.schema import ClipRef, FormatSpec, MusicTrack, Timeline
+from app.dsl.schema import ClipRef, FormatSpec, MusicTrack, Timeline, VoiceoverTrack
 from app.storage.storage_manager import StorageManager
 
 log = get_logger(__name__)
@@ -96,21 +96,179 @@ def build_timeline(plan: dict, signals: dict, storage: StorageManager) -> Timeli
     if target and target > 0:
         clips = _trim_to_duration(clips, target)
 
-    # Music track
+    # Music + voiceover. Prefer explicitly tagged roles from the upload form;
+    # if none are tagged, fall back to "first audio file is music" for back-compat.
     music = None
-    audio_files = storage.raw_audio_files()
-    if audio_files:
+    voiceover = None
+
+    music_candidates = storage.raw_files_by_role("music")
+    voiceover_candidates = storage.raw_files_by_role("voiceover")
+    untagged_audio = [
+        f for f in storage.raw_audio_files()
+        if storage.role_of(f.name) == "music"  # role_of falls back to "music" for audio
+        and f not in music_candidates
+        and f not in voiceover_candidates
+    ]
+
+    music_pick = music_candidates[0] if music_candidates else (
+        untagged_audio[0] if untagged_audio else None
+    )
+    if music_pick:
         music = MusicTrack(
-            source=audio_files[0].name,
+            source=music_pick.name,
             sync_beats="beat_sync" in operations,
         )
 
-    timeline = Timeline(format=fmt, clips=clips, music=music)
+    if voiceover_candidates:
+        # Lower music volume when voiceover is present so dialogue stays audible.
+        voiceover = VoiceoverTrack(source=voiceover_candidates[0].name)
+        if music and voiceover.duck_music:
+            music.volume = min(music.volume, 0.15)
+
+    # Image clips: any image files uploaded to raw/ are auto-prepended as
+    # 3-second intro slides with a default Ken Burns zoom. Order is by
+    # filename so users can control the sequence by naming (00_intro.jpg, ...).
+    image_clips = _build_image_intros(storage)
+    if image_clips:
+        clips = image_clips + clips
+        log.info("Prepended %d image intro slide(s)", len(image_clips))
+
+    # Smart crop: when output aspect ≠ source aspect, use face data to choose
+    # a crop window per video clip instead of letterboxing.
+    _apply_smart_crop(clips, fmt, signals)
+
+    timeline = Timeline(format=fmt, clips=clips, music=music, voiceover=voiceover)
     log.info(
         "Timeline built: %d clips, %.1fs total, format=%s",
         len(clips), timeline.total_duration(), fmt.aspect,
     )
     return timeline
+
+
+DEFAULT_IMAGE_DURATION = 3.0
+DEFAULT_KEN_BURNS_ZOOM = 1.15
+
+# When the output aspect differs from the source aspect by less than this
+# fraction, smart crop is a no-op and we skip computing it.
+ASPECT_MISMATCH_TOLERANCE = 0.02
+
+
+def _apply_smart_crop(
+    clips: list[ClipRef],
+    fmt: FormatSpec,
+    signals: dict,
+) -> None:
+    """Set `crop_box` on each video clip when output aspect differs from
+    source aspect AND face detections fall within the clip's time range.
+
+    Mutates the clips in place. No-op for image clips and clips whose
+    sources are pure-aspect-match. Falls back to centered crop when no
+    faces are detected.
+    """
+    target_aspect = fmt.width / max(1, fmt.height)
+    manifest = signals.get("media_manifest", {})
+    source_dims: dict[str, tuple[int, int]] = {
+        f["filename"]: (int(f.get("width", 0)), int(f.get("height", 0)))
+        for f in manifest.get("files", [])
+        if f.get("width", 0) > 0
+    }
+    faces = signals.get("faces") or {}
+    faces_by_source: dict[str, list[dict]] = {
+        track["source"]: track.get("detections", [])
+        for track in faces.get("tracks", [])
+    }
+
+    for clip in clips:
+        if clip.clip_type == "image":
+            continue
+        dims = source_dims.get(clip.source)
+        if not dims:
+            continue
+        sw, sh = dims
+        if sh <= 0:
+            continue
+        source_aspect = sw / sh
+        if abs(source_aspect - target_aspect) / target_aspect < ASPECT_MISMATCH_TOLERANCE:
+            continue  # aspects match — no crop needed
+
+        clip.crop_box = _compute_crop_box(
+            source_aspect=source_aspect,
+            target_aspect=target_aspect,
+            face_detections=faces_by_source.get(clip.source, []),
+            clip_start=clip.start,
+            clip_end=clip.end,
+        )
+
+
+def _compute_crop_box(
+    source_aspect: float,
+    target_aspect: float,
+    face_detections: list[dict],
+    clip_start: float,
+    clip_end: float,
+) -> dict:
+    """Compute a relative crop window (w, h, x, y all in [0, 1]) that keeps
+    faces centered. Returns a centered crop when no faces match the range."""
+    if source_aspect > target_aspect:
+        # Source is wider than target → narrow vertical crop. Height stays
+        # full, width is reduced to match target aspect.
+        w = target_aspect / source_aspect
+        h = 1.0
+        # Average face center across the clip's time range
+        cx = _average_face_center_x(face_detections, clip_start, clip_end)
+        # Position so the crop is centered on cx, clamped within [0, 1-w]
+        x = max(0.0, min(1.0 - w, cx - w / 2))
+        y = 0.0
+    else:
+        # Source is taller than target → wide horizontal crop. Width stays
+        # full, height is reduced. Center vertically (face data here would
+        # require a y-centroid — skipping for v1).
+        w = 1.0
+        h = source_aspect / target_aspect
+        x = 0.0
+        y = max(0.0, min(1.0 - h, 0.5 - h / 2))
+
+    return {"w": round(w, 4), "h": round(h, 4),
+            "x": round(x, 4), "y": round(y, 4)}
+
+
+def _average_face_center_x(
+    detections: list[dict], clip_start: float, clip_end: float,
+) -> float:
+    """Mean x-center of all face boxes within [clip_start, clip_end].
+    Returns 0.5 (centered) if no faces match the range."""
+    centers = []
+    for det in detections:
+        t = det.get("time", 0)
+        if t < clip_start or t > clip_end:
+            continue
+        for box in det.get("boxes", []):
+            cx = box.get("x", 0) + box.get("w", 0) / 2
+            centers.append(cx)
+    if not centers:
+        return 0.5
+    return sum(centers) / len(centers)
+
+
+def _build_image_intros(storage: StorageManager) -> list[ClipRef]:
+    """Build a ClipRef per uploaded image file, with default Ken Burns zoom.
+
+    Image clips are returned in alphabetical order so users can shape the
+    sequence via filenames (00_title.png, 01_subtitle.jpg, ...).
+    """
+    images = sorted(storage.raw_image_files(), key=lambda p: p.name)
+    return [
+        ClipRef(
+            source=img.name,
+            start=0.0,
+            end=DEFAULT_IMAGE_DURATION,
+            zoom=DEFAULT_KEN_BURNS_ZOOM,
+            clip_type="image",
+            transition_in="fade" if i == 0 else "crossfade",
+            transition_duration=0.4,
+        )
+        for i, img in enumerate(images)
+    ]
 
 
 def _clips_from_story(story: list[dict]) -> list[ClipRef]:

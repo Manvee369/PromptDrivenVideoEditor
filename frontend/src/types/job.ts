@@ -11,7 +11,8 @@ export type JobStatus =
   | 'planning'
   | 'rendering'
   | 'completed'
-  | 'failed';
+  | 'failed'
+  | 'interrupted';
 
 /** The core job record returned by GET /jobs and GET /jobs/{id}. */
 export interface JobRecord {
@@ -23,45 +24,62 @@ export interface JobRecord {
   error: string | null;
   progress: number;     // 0.0 – 1.0
   output_file: string | null;
+  /** Required as ?token= on /download and /thumbnail when the backend
+   *  has download_token_required enabled (default: true). */
+  download_token: string;
 }
 
 /** Response from POST /jobs/ */
 export interface CreateJobResponse {
   job_id: string;
   status: JobStatus;
+  download_token: string;
 }
 
-/** Timeline DSL format returned by GET /jobs/{id}/timeline */
+/** Timeline DSL — mirrors backend/app/dsl/schema.py exactly. */
 export interface TimelineFormat {
-  aspect: string;   // e.g. "16:9" or "9:16"
+  width: number;
+  height: number;
   fps: number;
-  width?: number;
-  height?: number;
+  aspect: string;   // e.g. "16:9" or "9:16"
 }
 
+/** A reference to a segment of a source file. */
 export interface TimelineClip {
   source: string;
-  start: number;
-  end: number;
-  transition?: string;
+  start: number;            // seconds
+  end: number;              // seconds
+  speed: number;            // 1.0 = normal
+  volume: number;           // 1.0 = original
+  transition_in: string | null;     // "crossfade" | "fade" | "flash" | null
+  transition_duration: number;
+  zoom: number;             // 1.0 = no zoom
+  filters: string[];
 }
 
+/** A subtitle/caption entry on the output timeline. */
 export interface TimelineCaption {
-  time: number;
+  start: number;
+  end: number;
   text: string;
-  style?: string;
+  style: string;            // "default" | "tiktok_bold" | ...
+  position: string;         // "bottom_center" | ...
 }
 
 export interface TimelineMusic {
-  track: string;
-  sync_beats?: boolean;
+  source: string | null;
+  volume: number;
+  fade_in: number;
+  fade_out: number;
+  sync_beats: boolean;
 }
 
 export interface TimelineDSL {
+  version: string;
   format: TimelineFormat;
   clips: TimelineClip[];
-  captions?: TimelineCaption[];
-  music?: TimelineMusic;
+  captions: TimelineCaption[];
+  music: TimelineMusic | null;
 }
 
 /** Explanation decision entry */
@@ -116,7 +134,7 @@ export function getStageIndex(status: JobStatus): number {
 
 /** Whether the job is still actively running. */
 export function isJobActive(status: JobStatus): boolean {
-  return !['completed', 'failed'].includes(status);
+  return !['completed', 'failed', 'interrupted'].includes(status);
 }
 
 /** Maps a JobStatus to its display label. */
@@ -128,4 +146,5 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
   rendering:     'Rendering',
   completed:     'Completed',
   failed:        'Failed',
+  interrupted:   'Interrupted',
 };

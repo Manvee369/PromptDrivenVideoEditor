@@ -23,10 +23,10 @@ import { PromptDisplay }          from '@/components/job/PromptDisplay';
 
 export default function JobPage() {
   const { jobId } = useParams<{ jobId: string }>();
-  const { job, loading, error } = useJob(jobId);
+  const { job, substage, loading, error } = useJob(jobId);
 
   const isComplete = job?.status === 'completed';
-  const isFailed   = job?.status === 'failed';
+  const isFailed   = job?.status === 'failed' || job?.status === 'interrupted';
   const isActive   = job !== null && !isComplete && !isFailed;
 
   if (loading && !job) {
@@ -68,19 +68,33 @@ export default function JobPage() {
         </div>
 
         {isComplete && (
-          <a
-            href={getVideoUrl(jobId)}
-            download={`edited_${shortId(jobId)}.mp4`}
-            className={cn(
-              'inline-flex items-center gap-2 px-4 h-9 rounded-[var(--radius-md)]',
-              'bg-[var(--accent)] text-white text-sm font-medium',
-              'hover:bg-[var(--accent-hover)] active:bg-[var(--accent-active)]',
-              'transition-colors duration-[var(--duration-fast)]',
-            )}
-          >
-            <DownloadIcon />
-            Download Video
-          </a>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href={`/jobs/${jobId}/timeline`}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 h-9 rounded-[var(--radius-md)]',
+                'bg-[var(--surface-3)] border border-[var(--border)] text-[var(--text-primary)] text-sm font-medium',
+                'hover:border-[var(--accent)] hover:text-[var(--accent)]',
+                'transition-colors duration-[var(--duration-fast)]',
+              )}
+            >
+              <EditIcon />
+              Edit timeline
+            </Link>
+            <a
+              href={getVideoUrl(jobId, job.download_token)}
+              download={`edited_${shortId(jobId)}.mp4`}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 h-9 rounded-[var(--radius-md)]',
+                'bg-[var(--accent)] text-white text-sm font-medium',
+                'hover:bg-[var(--accent-hover)] active:bg-[var(--accent-active)]',
+                'transition-colors duration-[var(--duration-fast)]',
+              )}
+            >
+              <DownloadIcon />
+              Download Video
+            </a>
+          </div>
         )}
       </header>
 
@@ -114,6 +128,23 @@ export default function JobPage() {
             <p className="text-xs text-[var(--text-tertiary)] animate-pulse-dot">
               Analyzing your video — this may take a few minutes...
             </p>
+
+            {/* Sub-stage progress (e.g. live ffmpeg render %) */}
+            {substage && substage.substage === 'render' && substage.substage_progress !== null && (
+              <div className="w-full max-w-sm border-t border-[var(--border-subtle)] pt-4">
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-xs font-medium text-[var(--text-secondary)]">
+                    Encoding
+                  </span>
+                  <span className="text-xs tabular-nums text-[var(--text-tertiary)]">
+                    {Math.round((substage.substage_progress ?? 0) * 100)}%
+                    {substage.fps !== null ? ` · ${substage.fps.toFixed(0)} fps` : ''}
+                    {substage.speed ? ` · ${substage.speed}` : ''}
+                  </span>
+                </div>
+                <ProgressBar value={substage.substage_progress ?? 0} active />
+              </div>
+            )}
           </Card>
 
           {/* Sidebar: stage timeline */}
@@ -147,14 +178,14 @@ export default function JobPage() {
       )}
 
       {/* ─── COMPLETED STATE ─── */}
-      {isComplete && <CompletedView jobId={jobId} />}
+      {isComplete && <CompletedView jobId={jobId} downloadToken={job.download_token} />}
     </div>
   );
 }
 
 /* ─── Completed view ─────────────────────────────────────────────────────── */
 
-function CompletedView({ jobId }: { jobId: string }) {
+function CompletedView({ jobId, downloadToken }: { jobId: string; downloadToken: string }) {
   const [explanation, setExplanation] = useState<JobExplanation | null>(null);
   const [expLoading, setExpLoading]   = useState(true);
 
@@ -169,14 +200,14 @@ function CompletedView({ jobId }: { jobId: string }) {
     <div className="flex flex-col gap-6 animate-slide-up">
       {/* Video + stats row */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-6 items-start">
-        <VideoPlayer jobId={jobId} />
+        <VideoPlayer jobId={jobId} token={downloadToken} />
 
         <div className="flex flex-col gap-4">
           {/* Thumbnail */}
           <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border)] bg-[var(--surface-2)]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={getThumbnailUrl(jobId)}
+              src={getThumbnailUrl(jobId, downloadToken)}
               alt="Generated thumbnail"
               className="w-full object-cover"
               onError={(e) => {
@@ -291,6 +322,17 @@ function DownloadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
       <polyline points="7 10 12 15 17 10"/>
       <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+         aria-hidden="true">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
     </svg>
   );
 }

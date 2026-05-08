@@ -25,6 +25,9 @@ const variantStyles: Record<BadgeVariant, string> = {
   rendering:     'bg-[var(--status-processing-bg)] text-[var(--status-processing)]',
   completed:     'bg-[var(--status-success-bg)] text-[var(--status-success)]',
   failed:        'bg-[var(--status-error-bg)] text-[var(--status-error)]',
+  // Interrupted = the previous worker died; user can resume via /rerun.
+  // Visual treatment matches "failed" since the job is currently not running.
+  interrupted:   'bg-[var(--status-error-bg)] text-[var(--status-error)]',
 };
 
 const dotColors: Record<BadgeVariant, string> = {
@@ -36,6 +39,7 @@ const dotColors: Record<BadgeVariant, string> = {
   rendering:     'bg-[var(--status-processing)]',
   completed:     'bg-[var(--status-success)]',
   failed:        'bg-[var(--status-error)]',
+  interrupted:   'bg-[var(--status-error)]',
 };
 
 export function Badge({ variant = 'default', status, children, className }: BadgeProps) {

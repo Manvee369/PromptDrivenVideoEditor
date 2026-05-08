@@ -1,13 +1,20 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn, capitalize } from '@/lib/utils';
 import { Button }   from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
 import { DropZone } from '@/components/ui/DropZone';
 import { Card }     from '@/components/ui/Card';
-import { createJob, analyzeContent } from '@/lib/api';
+import {
+  createJob,
+  analyzeContent,
+  getCaptionStylePresets,
+  getColorGradePresets,
+  FALLBACK_CAPTION_PRESETS,
+  FALLBACK_COLOR_GRADES,
+} from '@/lib/api';
 import type { AnalysisResult } from '@/lib/api';
 
 const EXAMPLE_PROMPTS = [
@@ -20,6 +27,13 @@ export default function NewJobPage() {
   const router = useRouter();
 
   const [files,   setFiles]   = useState<File[]>([]);
+  const [musicFiles, setMusicFiles] = useState<File[]>([]);
+  const [voiceoverFiles, setVoiceoverFiles] = useState<File[]>([]);
+  const [showAudioSection, setShowAudioSection] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState<string>('');  // '' = let AI decide
+  const [captionPresets, setCaptionPresets] = useState<readonly string[]>(FALLBACK_CAPTION_PRESETS);
+  const [colorGrade, setColorGrade] = useState<string>('');      // '' = no grade
+  const [colorGradePresets, setColorGradePresets] = useState<readonly string[]>(FALLBACK_COLOR_GRADES);
   const [prompt,  setPrompt]  = useState('');
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -60,12 +74,32 @@ export default function NewJobPage() {
     }
   };
 
+  // Fetch presets on mount; fall back silently to the bundled lists.
+  useEffect(() => {
+    let alive = true;
+    getCaptionStylePresets()
+      .then((presets) => { if (alive) setCaptionPresets(presets); })
+      .catch(() => { /* keep fallback */ });
+    getColorGradePresets()
+      .then((presets) => { if (alive) setColorGradePresets(presets); })
+      .catch(() => { /* keep fallback */ });
+    return () => { alive = false; };
+  }, []);
+
   const startJob = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const { job_id } = await createJob(prompt.trim(), files);
+      const { job_id } = await createJob(prompt.trim(), files, {
+        musicFiles,
+        voiceoverFiles,
+        captionStyle: captionStyle || undefined,
+        colorGrade: colorGrade || undefined,
+        // Pass the analysis_id so the backend inherits cached signals
+        // (transcript, diarization, visual scores) — Whisper won't run twice.
+        analysisId: analysis?.analysis_id ?? null,
+      });
       router.push(`/jobs/${job_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start job. Please try again.');
@@ -99,6 +133,102 @@ export default function NewJobPage() {
                 onFilesChange={(f) => { setFiles(f); setAnalysis(null); }}
               />
             </div>
+          </div>
+
+          {/* Optional: Music / voiceover / caption style */}
+          <div className="p-6 border-b border-[var(--border-subtle)]">
+            <button
+              type="button"
+              onClick={() => setShowAudioSection((v) => !v)}
+              className="flex items-center gap-2 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              aria-expanded={showAudioSection}
+            >
+              <span className={cn(
+                'inline-block transition-transform duration-[var(--duration-fast)]',
+                showAudioSection && 'rotate-90',
+              )}>▸</span>
+              Optional: music, voiceover, caption style, color grade
+              {(musicFiles.length + voiceoverFiles.length + (captionStyle ? 1 : 0) + (colorGrade ? 1 : 0)) > 0 && (
+                <span className="text-[var(--accent)]">
+                  ({musicFiles.length + voiceoverFiles.length + (captionStyle ? 1 : 0) + (colorGrade ? 1 : 0)} configured)
+                </span>
+              )}
+            </button>
+
+            {showAudioSection && (
+              <div className="flex flex-col gap-4 mt-4 animate-fade-in">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                      Background music
+                    </label>
+                    <DropZone
+                      files={musicFiles}
+                      onFilesChange={(f) => { setMusicFiles(f); setAnalysis(null); }}
+                      accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                      Voiceover narration
+                    </label>
+                    <DropZone
+                      files={voiceoverFiles}
+                      onFilesChange={(f) => { setVoiceoverFiles(f); setAnalysis(null); }}
+                      accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="caption-style" className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                      Caption style
+                    </label>
+                    <select
+                      id="caption-style"
+                      value={captionStyle}
+                      onChange={(e) => { setCaptionStyle(e.target.value); setAnalysis(null); }}
+                      className={cn(
+                        'w-full h-9 px-2 rounded-[var(--radius-sm)] text-sm',
+                        'bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)]',
+                        'focus-visible:outline-none focus-visible:border-[var(--accent)]',
+                      )}
+                    >
+                      <option value="">Auto (let the AI choose)</option>
+                      {captionPresets.map((p) => (
+                        <option key={p} value={p}>
+                          {p.replace(/_/g, ' ')}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="color-grade" className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                      Color grade
+                    </label>
+                    <select
+                      id="color-grade"
+                      value={colorGrade}
+                      onChange={(e) => { setColorGrade(e.target.value); setAnalysis(null); }}
+                      className={cn(
+                        'w-full h-9 px-2 rounded-[var(--radius-sm)] text-sm',
+                        'bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)]',
+                        'focus-visible:outline-none focus-visible:border-[var(--accent)]',
+                      )}
+                    >
+                      <option value="">No color grade</option>
+                      {colorGradePresets.filter((p) => p !== 'none').map((p) => (
+                        <option key={p} value={p}>
+                          {p.replace(/_/g, ' ')}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Section 2: Prompt */}

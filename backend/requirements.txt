@@ -24,8 +24,11 @@ mediapipe
 # Image processing (thumbnails)
 Pillow
 
-# Transcription
-openai-whisper
+# Transcription — faster-whisper at fp32 (identical accuracy to openai-whisper, ~2-4x faster on CPU)
+faster-whisper
+# WhisperX adds wav2vec2 forced alignment for tighter word boundaries.
+# Optional at runtime — transcribe.py falls back if it fails to import.
+whisperx
 
 # Visual understanding (SigLIP)
 open-clip-torch
@@ -35,3 +38,8 @@ transformers
 
 # HTTP
 requests
+
+# Job queue + cross-process safety
+redis
+rq
+filelock
