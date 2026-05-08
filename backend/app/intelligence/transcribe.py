@@ -78,15 +78,21 @@ def _get_align_model(language_code: str):
 
 
 def transcribe_media(storage: StorageManager) -> dict:
-    """Transcribe each audio file from prep/, with optional WhisperX alignment.
+    """Transcribe each audio file from prep/.
 
-    Output saved to signals/transcript.json:
+    Backend selection (in priority order):
+      1. Azure AI Speech — if PDVE_AZURE_SPEECH_KEY is set. Real-time speed,
+         word-level timestamps + diarization via cloud API. No GPU needed.
+      2. faster-whisper — local CPU/GPU fallback. Slow on CPU without a GPU
+         (3-10x real-time for the medium model).
+
+    Output saved to signals/transcript.json with schema:
     {
       "tracks": [
         {
           "source": "clip1.mp4",
           "language": "en",
-          "alignment": "whisperx" | "faster_whisper",
+          "alignment": "azure_speech" | "whisperx" | "faster_whisper",
           "segments": [
             {
               "start": 0.0, "end": 2.5, "text": "Hello world",
@@ -101,10 +107,17 @@ def transcribe_media(storage: StorageManager) -> dict:
       ]
     }
     """
+    from app.intelligence.azure_speech import is_available as azure_available
+    from app.intelligence.azure_speech import transcribe_file_azure
+
     manifest = storage.load_signal("media_manifest")
-    model = _get_model()
-    use_alignment = settings.use_whisperx_alignment and _try_import_whisperx()
     tracks = []
+
+    use_azure = azure_available()
+    if use_azure:
+        log.info("Transcription backend: Azure AI Speech (cloud, real-time speed)")
+    else:
+        log.info("Transcription backend: faster-whisper (local CPU)")
 
     for file_info in manifest["files"]:
         audio_path = file_info["audio_path"]
@@ -112,6 +125,30 @@ def transcribe_media(storage: StorageManager) -> dict:
             continue
 
         log.info("Transcribing: %s", file_info["filename"])
+
+        if use_azure:
+            # --- Azure Speech path (fast, cloud) ---
+            try:
+                result = transcribe_file_azure(Path(audio_path))
+                tracks.append({
+                    "source": file_info["filename"],
+                    "language": result["language"],
+                    "alignment": result["alignment"],
+                    "segments": result["segments"],
+                    "full_text": result["full_text"],
+                })
+                continue  # Skip the faster-whisper path below
+            except Exception as e:
+                log.warning(
+                    "Azure Speech failed for %s: %s — falling back to faster-whisper",
+                    file_info["filename"], e,
+                )
+                # Fall through to faster-whisper
+
+        # --- faster-whisper path (local CPU fallback) ---
+        model = _get_model()
+        use_alignment = settings.use_whisperx_alignment and _try_import_whisperx()
+
         segments_iter, info = model.transcribe(
             audio_path,
             word_timestamps=True,
@@ -206,3 +243,4 @@ def _align_with_whisperx(
     )
     # WhisperX returns {"segments": [...], "word_segments": [...]}
     return aligned.get("segments", segments)
+

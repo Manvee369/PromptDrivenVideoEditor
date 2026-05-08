@@ -43,3 +43,10 @@ requests
 redis
 rq
 filelock
+
+# ─── Azure SDK (optional — only needed when PDVE_STORAGE_BACKEND=azure
+#                          or PDVE_AZURE_SPEECH_KEY is set) ───────────────
+# Uncomment to install, or install selectively:
+#   pip install azure-storage-blob azure-cognitiveservices-speech
+# azure-storage-blob
+# azure-cognitiveservices-speech

@@ -1,0 +1,107 @@
+# PromptDrivenVideoEditor — Full Stack Docker Compose
+#
+# Usage:
+#   cp .env.example .env.production
+#   # Fill in secrets in .env.production
+#   docker compose --env-file .env.production up --build
+#
+# Services:
+#   redis     — job queue (Azure Cache for Redis in production)
+#   api       — FastAPI backend
+#   worker    — RQ pipeline worker (processes jobs from queue)
+#   frontend  — Next.js UI
+#   nginx     — reverse proxy (routes / → frontend, /jobs → api)
+
+version: "3.9"
+
+services:
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # In production, replace with Azure Cache for Redis URL in .env.production
+
+  # ── FastAPI API ──────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Shared volume for job artifacts (local dev only; use Azure Blob in prod)
+      - job_storage:/app/storage/jobs
+    env_file:
+      - .env.production
+    environment:
+      PDVE_QUEUE_ENABLED: "true"
+      PDVE_REDIS_URL: "redis://redis:6379/0"
+      PDVE_STORAGE_BASE: "/app/storage/jobs"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── RQ Worker ────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "worker/worker.py"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - job_storage:/app/storage/jobs
+    env_file:
+      - .env.production
+    environment:
+      PDVE_QUEUE_ENABLED: "true"
+      PDVE_REDIS_URL: "redis://redis:6379/0"
+      PDVE_STORAGE_BASE: "/app/storage/jobs"
+    # Scale horizontally: docker compose up --scale worker=3
+    deploy:
+      replicas: 1
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost/api}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+  # ── Nginx Reverse Proxy ──────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Mount SSL certs here for HTTPS:
+      # - ./nginx/certs:/etc/nginx/certs:ro
+
+volumes:
+  job_storage:
+    driver: local

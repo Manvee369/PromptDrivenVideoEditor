@@ -97,6 +97,22 @@ class Settings(BaseSettings):
     # Per-job worker timeout (10 min default). Long renders may need a higher value.
     queue_job_timeout: int = 600
 
+    # --- Azure AI Speech (transcription) ---
+    # When set, the transcription stage uses Azure AI Speech instead of
+    # faster-whisper. Real-time speed, no GPU needed. Free tier: 5 hrs/month.
+    # Get a key at: https://portal.azure.com → Azure AI Services → Speech
+    azure_speech_key: str = ""
+    azure_speech_region: str = "eastus"
+
+    # --- Azure Blob Storage ---
+    # When PDVE_STORAGE_BACKEND=azure, job artifacts are stored in Azure Blob
+    # Storage instead of the local filesystem. Required for multi-instance
+    # deployments and Container Apps (ephemeral local disks).
+    # Get a connection string at: Azure Portal → Storage Accounts → Access keys
+    storage_backend: str = "local"          # "local" | "azure"
+    azure_storage_connection_string: str = ""
+    azure_storage_container: str = "pdve-jobs"
+
     # --- Disk janitor ---
     # Periodically remove intermediate artifacts (prep/, render/, signals/)
     # for completed jobs aged past the threshold. Safe — does not delete the
