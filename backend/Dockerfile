@@ -9,29 +9,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-# Install CUDA-enabled PyTorch first, then the rest of the requirements.
-# The --extra-index-url makes pip find the CUDA wheels.
+# Install CPU-only PyTorch to save gigabytes of space since we don't have a GPU
 RUN pip install --no-cache-dir --prefix=/install \
         torch torchvision torchaudio \
-        --index-url https://download.pytorch.org/whl/cu121 \
+        --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir --prefix=/install \
         -r requirements.txt \
-        --extra-index-url https://download.pytorch.org/whl/cu121
+        --extra-index-url https://download.pytorch.org/whl/cpu
 
-# ── Stage 2: CUDA runtime ────────────────────────────────────────────────────
-# Use NVIDIA CUDA base so the GPU is accessible inside the container.
-# CUDA 12.1 + cuDNN 8 matches PyTorch 2.x wheels.
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS runtime
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
 
-# Install Python 3.11 on the CUDA base (Ubuntu 22.04 has 3.10 by default)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-distutils python3-pip \
         ffmpeg \
         libgl1 \
         libglib2.0-0 \
         curl \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder stage
