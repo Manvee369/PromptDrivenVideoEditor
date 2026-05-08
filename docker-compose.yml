@@ -1,21 +1,17 @@
-# PromptDrivenVideoEditor — Full Stack Docker Compose
+# PromptDrivenVideoEditor — GPU VM Docker Compose
 #
-# Usage:
-#   cp .env.example .env.production
-#   # Fill in secrets in .env.production
-#   docker compose --env-file .env.production up --build
+# Usage on the Azure GPU VM:
+#   1. Copy .env.example to .env.production and fill in secrets
+#   2. docker compose --env-file .env.production up --build -d
 #
-# Services:
-#   redis     — job queue (Azure Cache for Redis in production)
-#   api       — FastAPI backend
-#   worker    — RQ pipeline worker (processes jobs from queue)
-#   frontend  — Next.js UI
-#   nginx     — reverse proxy (routes / → frontend, /jobs → api)
+# Architecture: single GPU VM running all services.
+# The NVIDIA GPU is passed through to the worker container only.
+# The API stays on CPU (it just routes requests; no ML inference).
 
 version: "3.9"
 
 services:
-  # ── Redis ────────────────────────────────────────────────────────────────
+  # ── Redis ─────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -24,9 +20,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # In production, replace with Azure Cache for Redis URL in .env.production
+    volumes:
+      - redis_data:/data
 
-  # ── FastAPI API ──────────────────────────────────────────────────────────
+  # ── FastAPI API (CPU only — just routes HTTP, no ML) ──────────────────────
   api:
     build:
       context: ./backend
@@ -36,7 +33,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      # Shared volume for job artifacts (local dev only; use Azure Blob in prod)
       - job_storage:/app/storage/jobs
     env_file:
       - .env.production
@@ -52,7 +48,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── RQ Worker ────────────────────────────────────────────────────────────
+  # ── RQ Worker (GPU — runs Whisper, SigLIP, face detection) ───────────────
   worker:
     build:
       context: ./backend
@@ -70,11 +66,23 @@ services:
       PDVE_QUEUE_ENABLED: "true"
       PDVE_REDIS_URL: "redis://redis:6379/0"
       PDVE_STORAGE_BASE: "/app/storage/jobs"
-    # Scale horizontally: docker compose up --scale worker=3
+      # GPU-optimised settings for production
+      PDVE_WHISPER_MODEL: "large-v3"
+      PDVE_WHISPER_DEVICE: "cuda"
+      PDVE_WHISPER_COMPUTE_TYPE: "float16"
+      PDVE_USE_WHISPERX_ALIGNMENT: "true"
+      PDVE_VISUAL_SCORING_ENABLED: "true"
+    # ── GPU passthrough ──────────────────────────────────────────────────
     deploy:
-      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    runtime: nvidia   # requires nvidia-container-toolkit on the VM
 
-  # ── Next.js Frontend ─────────────────────────────────────────────────────
+  # ── Next.js Frontend ──────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -87,7 +95,7 @@ services:
     ports:
       - "3000:3000"
 
-  # ── Nginx Reverse Proxy ──────────────────────────────────────────────────
+  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
     restart: unless-stopped
@@ -99,9 +107,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Mount SSL certs here for HTTPS:
-      # - ./nginx/certs:/etc/nginx/certs:ro
 
 volumes:
   job_storage:
+    driver: local
+  redis_data:
     driver: local
