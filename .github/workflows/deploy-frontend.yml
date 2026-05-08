@@ -24,7 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
           lfs: false
 
       - name: Build and Deploy to Azure Static Web Apps

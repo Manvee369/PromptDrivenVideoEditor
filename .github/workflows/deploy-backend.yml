@@ -1,4 +1,4 @@
-name: Deploy to Azure GPU VM
+name: Deploy to Azure VM
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: SSH Deploy to GPU VM
+    name: SSH Deploy to VM
 
     steps:
       - name: Checkout
