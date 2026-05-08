@@ -32,11 +32,11 @@ from pathlib import Path
 # Ensure the backend package is importable when this script is invoked
 # directly (i.e. ``python worker/worker.py`` from the repo root).
 # ``backend/`` must be on sys.path so ``import app.*`` works.
-_backend_dir = Path(__file__).resolve().parent.parent / "backend"
+_backend_dir = Path(__file__).resolve().parent.parent
 if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
 
-from app.worker.run import main  # noqa: E402 — path must be set first
+from app.worker.run import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())
