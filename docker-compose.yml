@@ -1,12 +1,12 @@
-# PromptDrivenVideoEditor — GPU VM Docker Compose
+# PromptDrivenVideoEditor — CPU VM Docker Compose
 #
-# Usage on the Azure GPU VM:
+# Usage on the Azure CPU VM:
 #   1. Copy .env.example to .env.production and fill in secrets
+#      (Make sure PDVE_AZURE_SPEECH_KEY is set to offload transcription!)
 #   2. docker compose --env-file .env.production up --build -d
 #
-# Architecture: single GPU VM running all services.
-# The NVIDIA GPU is passed through to the worker container only.
-# The API stays on CPU (it just routes requests; no ML inference).
+# Architecture: single CPU VM running all services.
+# The worker runs on CPU but offloads ML to Azure Speech for speed.
 
 version: "3.9"
 
@@ -66,21 +66,12 @@ services:
       PDVE_QUEUE_ENABLED: "true"
       PDVE_REDIS_URL: "redis://redis:6379/0"
       PDVE_STORAGE_BASE: "/app/storage/jobs"
-      # GPU-optimised settings for production
-      PDVE_WHISPER_MODEL: "large-v3"
-      PDVE_WHISPER_DEVICE: "cuda"
-      PDVE_WHISPER_COMPUTE_TYPE: "float16"
-      PDVE_USE_WHISPERX_ALIGNMENT: "true"
+      # CPU-optimised settings (offloading to Azure Speech API)
+      PDVE_WHISPER_MODEL: "medium"
+      PDVE_WHISPER_DEVICE: "cpu"
+      PDVE_WHISPER_COMPUTE_TYPE: "float32"
+      PDVE_USE_WHISPERX_ALIGNMENT: "false"
       PDVE_VISUAL_SCORING_ENABLED: "true"
-    # ── GPU passthrough ──────────────────────────────────────────────────
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    runtime: nvidia   # requires nvidia-container-toolkit on the VM
 
   # ── Next.js Frontend ──────────────────────────────────────────────────────
   frontend:
