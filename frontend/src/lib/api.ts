@@ -34,12 +34,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** List all jobs. */
 export async function listJobs(): Promise<JobRecord[]> {
-  return apiFetch<JobRecord[]>('/jobs/');
+  return apiFetch<JobRecord[]>('/api/jobs/');
 }
 
 /** Get a single job by ID. */
 export async function getJob(jobId: string): Promise<JobRecord> {
-  return apiFetch<JobRecord>(`/jobs/${jobId}`);
+  return apiFetch<JobRecord>(`/api/jobs/${jobId}`);
 }
 
 /** Optional extras for createJob. Each field is independently optional. */
@@ -81,7 +81,7 @@ export async function createJob(
   // Pass the analysis_id so the backend can reuse cached ML signals.
   if (extras.analysisId) form.append('analysis_id', extras.analysisId);
 
-  return apiFetch<CreateJobResponse>('/jobs/', {
+  return apiFetch<CreateJobResponse>('/api/jobs/', {
     method: 'POST',
     body: form,
     // Do NOT set Content-Type — browser sets multipart boundary automatically.
@@ -93,7 +93,7 @@ export async function createJob(
 
 /** Get the Timeline DSL for a completed job. */
 export async function getTimeline(jobId: string): Promise<TimelineDSL> {
-  return apiFetch<TimelineDSL>(`/jobs/${jobId}/timeline`);
+  return apiFetch<TimelineDSL>(`/api/jobs/${jobId}/timeline`);
 }
 
 /** Replace the Timeline DSL on disk (does NOT trigger a re-render). */
@@ -101,7 +101,7 @@ export async function updateTimeline(
   jobId: string,
   timeline: TimelineDSL,
 ): Promise<TimelineDSL> {
-  return apiFetch<TimelineDSL>(`/jobs/${jobId}/timeline`, {
+  return apiFetch<TimelineDSL>(`/api/jobs/${jobId}/timeline`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(timeline),
@@ -110,7 +110,7 @@ export async function updateTimeline(
 
 /** Get the AI explanation of editing decisions. */
 export async function getExplanation(jobId: string): Promise<JobExplanation> {
-  return apiFetch<JobExplanation>(`/jobs/${jobId}/explanation`);
+  return apiFetch<JobExplanation>(`/api/jobs/${jobId}/explanation`);
 }
 
 /* ─── Content Analysis ─────────────────────────────────────────────────── */
@@ -147,7 +147,7 @@ export async function analyzeContent(
     form.append('files', file);
   }
 
-  return apiFetch<AnalysisResult>('/jobs/analyze', {
+  return apiFetch<AnalysisResult>('/api/jobs/analyze', {
     method: 'POST',
     body: form,
     headers: {},
@@ -163,13 +163,13 @@ export async function analyzeContent(
  */
 export function getVideoUrl(jobId: string, token?: string): string {
   const qs = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${BASE_URL}/jobs/${jobId}/download${qs}`;
+  return `${BASE_URL}/api/jobs/${jobId}/download${qs}`;
 }
 
 /** Returns a direct URL to the job thumbnail image. */
 export function getThumbnailUrl(jobId: string, token?: string): string {
   const qs = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${BASE_URL}/jobs/${jobId}/thumbnail${qs}`;
+  return `${BASE_URL}/api/jobs/${jobId}/thumbnail${qs}`;
 }
 
 /* ─── Pipeline control (Phase 1) ───────────────────────────────────────── */
@@ -177,17 +177,17 @@ export function getThumbnailUrl(jobId: string, token?: string): string {
 /** Re-run an existing job, reusing cached per-stage artifacts. */
 export async function rerunJob(jobId: string, force = false): Promise<{ job_id: string }> {
   const qs = force ? '?force=true' : '';
-  return apiFetch<{ job_id: string }>(`/jobs/${jobId}/rerun${qs}`, { method: 'POST' });
+  return apiFetch<{ job_id: string }>(`/api/jobs/${jobId}/rerun${qs}`, { method: 'POST' });
 }
 
 /** Re-render only — assumes the timeline DSL is on disk. */
 export async function rerenderJob(jobId: string): Promise<{ job_id: string }> {
-  return apiFetch<{ job_id: string }>(`/jobs/${jobId}/rerender`, { method: 'POST' });
+  return apiFetch<{ job_id: string }>(`/api/jobs/${jobId}/rerender`, { method: 'POST' });
 }
 
 /** Caption style presets supported by the backend. */
 export async function getCaptionStylePresets(): Promise<string[]> {
-  const data = await apiFetch<{ presets: string[] }>('/jobs/caption-styles');
+  const data = await apiFetch<{ presets: string[] }>('/api/jobs/caption-styles');
   return data.presets;
 }
 
@@ -199,7 +199,7 @@ export const FALLBACK_CAPTION_PRESETS = [
 
 /** Color grade presets supported by the backend. */
 export async function getColorGradePresets(): Promise<string[]> {
-  const data = await apiFetch<{ presets: string[] }>('/jobs/color-grades');
+  const data = await apiFetch<{ presets: string[] }>('/api/jobs/color-grades');
   return data.presets;
 }
 

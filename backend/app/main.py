@@ -45,7 +45,7 @@ app.add_middleware(
 )
 
 # Job pipeline routes
-app.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 
 
 @app.get("/health")
