@@ -12,14 +12,18 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
 
     # Whisper
-    # Default upgraded from "small" → "medium" for noticeably better
-    # transcription on accented/noisy speech. ~3x slower on CPU but
-    # caption text quality is the most user-visible AI output. Override
-    # via PDVE_WHISPER_MODEL=small to revert.
+    # Local dev default: small on CPU for fast testing.
+    # GPU VM production: set PDVE_WHISPER_MODEL=large-v3
     whisper_model: str = "medium"
+    # Device for faster-whisper inference.
+    # Set PDVE_WHISPER_DEVICE=cuda on the GPU VM for ~50x speedup.
+    whisper_device: str = "cpu"             # "cpu" | "cuda"
+    # Compute type for faster-whisper.
+    # float16 on GPU is fastest and uses half the VRAM.
+    # float32 on CPU is required (GPUs only support float16/int8).
+    whisper_compute_type: str = "float32"   # "float32" | "float16" | "int8"
     # When True, run WhisperX wav2vec2 forced alignment on top of
-    # faster-whisper's output for tighter word-level timing. Falls back to
-    # faster-whisper's word_timestamps if WhisperX import or alignment fails.
+    # faster-whisper's output for tighter word-level timing.
     use_whisperx_alignment: bool = True
 
     # Preprocessing

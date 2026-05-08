@@ -36,13 +36,15 @@ def _get_model() -> WhisperModel:
     global _model
     if _model is None:
         log.info(
-            "Loading faster-whisper model: %s (cpu, float32)",
+            "Loading faster-whisper model: %s (%s, %s)",
             settings.whisper_model,
+            settings.whisper_device,
+            settings.whisper_compute_type,
         )
         _model = WhisperModel(
             settings.whisper_model,
-            device="cpu",
-            compute_type="float32",
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
         )
     return _model
 
@@ -71,7 +73,8 @@ def _get_align_model(language_code: str):
     import whisperx
     log.info("Loading WhisperX alignment model for language=%s", language_code)
     _align_model, _align_metadata = whisperx.load_align_model(
-        language_code=language_code, device="cpu",
+        language_code=language_code,
+        device=settings.whisper_device,  # use GPU if available
     )
     _align_lang_code = language_code
     return _align_model, _align_metadata
@@ -238,7 +241,7 @@ def _align_with_whisperx(
         align_model,
         metadata,
         audio_path,
-        device="cpu",
+        device=settings.whisper_device,  # GPU if available
         return_char_alignments=False,
     )
     # WhisperX returns {"segments": [...], "word_segments": [...]}
