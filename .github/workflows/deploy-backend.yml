@@ -36,7 +36,6 @@ jobs:
             git clean -fd
 
             # ── DISK CLEANUP ──────────────────────────────────────────────────
-            echo "Pre-build disk cleanup..."
             docker system prune -af --volumes
             docker builder prune -af
 
@@ -50,8 +49,6 @@ jobs:
               exit 1
             fi
 
-            echo "Building with NEXT_PUBLIC_API_URL=$API_URL"
-
             # ── PERMISSIONS FIX ───────────────────────────────────────────────
             sudo chown -R 1001:1001 /opt/pdve/backend/storage || true
 
@@ -59,26 +56,9 @@ jobs:
             NEXT_PUBLIC_API_URL=$API_URL docker compose --env-file .env.production \
               up --build -d --remove-orphans
 
-            # ── FORCE NGINX RESTART ───────────────────────────────────────────
-            # Nginx often holds onto old container IPs (DNS caching). 
-            # Forcing a restart ensures it picks up the fresh API/Frontend containers.
-            echo "Restarting Nginx to refresh DNS..."
+            # ── REFRESH NGINX ─────────────────────────────────────────────────
             docker compose restart nginx
 
-            # Wait a few seconds for services to initialize before grabbing logs
-            echo "Waiting for services to start..."
-            sleep 10
-
-            # ── DIAGNOSTICS ───────────────────────────────────────────────────
-            echo "--- Service Status ---"
-            docker compose ps
-            
-            echo "--- Backend API Logs ---"
-            docker compose logs --tail 50 api
-            
-            echo "--- Nginx Error Logs ---"
-            docker compose logs --tail 20 nginx
-            
             # Clean up old images to save disk space
             docker image prune -f
 
