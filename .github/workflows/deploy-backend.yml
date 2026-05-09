@@ -1,10 +1,11 @@
-name: Deploy to Azure VM
+﻿name: Deploy to Azure VM
 
 on:
   push:
     branches: [main]
     paths:
       - "backend/**"
+      - "frontend/**"
       - "docker-compose.yml"
       - "nginx/**"
       - ".github/workflows/deploy-backend.yml"
@@ -37,11 +38,23 @@ jobs:
             # Write production env file from GitHub secret
             echo "${{ secrets.ENV_PRODUCTION }}" > .env.production
 
-            # Rebuild and restart services (GPU worker gets latest Whisper)
-            docker compose --env-file .env.production \
+            # Extract NEXT_PUBLIC_API_URL from .env.production for the frontend build-arg.
+            # We grep for it, taking the last match and stripping the key name.
+            API_URL=$(grep "^NEXT_PUBLIC_API_URL=" .env.production | cut -d"="f2- | tr -d "\r")
+            if [ -z "$API_URL" ]; then
+              echo "Error: NEXT_PUBLIC_API_URL not found in ENV_PRODUCTION secret"
+              exit 1
+            fi
+
+            echo "Building with NEXT_PUBLIC_API_URL=$API_URL"
+
+            # Rebuild and restart services.
+            # Passing the API URL as an env var so docker-compose.yml can use it as a build-arg.
+            NEXT_PUBLIC_API_URL=$API_URL docker compose --env-file .env.production \
               up --build -d --remove-orphans
 
             # Clean up old images to save disk space
             docker image prune -f
 
             echo "Deploy complete!"
+
