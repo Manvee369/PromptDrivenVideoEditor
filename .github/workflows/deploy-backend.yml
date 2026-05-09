@@ -40,7 +40,7 @@ jobs:
 
             # Extract NEXT_PUBLIC_API_URL from .env.production for the frontend build-arg.
             # We grep for it, taking the last match and stripping the key name.
-            API_URL=$(grep "^NEXT_PUBLIC_API_URL=" .env.production | cut -d"="f2- | tr -d "\r")
+            API_URL=$(grep "^NEXT_PUBLIC_API_URL=" .env.production | cut -d"=" -f2- | tr -d "\r")
             if [ -z "$API_URL" ]; then
               echo "Error: NEXT_PUBLIC_API_URL not found in ENV_PRODUCTION secret"
               exit 1
@@ -57,4 +57,5 @@ jobs:
             docker image prune -f
 
             echo "Deploy complete!"
+
 
