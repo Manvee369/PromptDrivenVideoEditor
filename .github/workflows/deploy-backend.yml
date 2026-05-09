@@ -36,8 +36,6 @@ jobs:
             git clean -fd
 
             # ── DISK CLEANUP ──────────────────────────────────────────────────
-            # The VM is running out of space during build. We must prune
-            # aggressively BEFORE building.
             echo "Pre-build disk cleanup..."
             docker system prune -af --volumes
             docker builder prune -af
@@ -54,11 +52,23 @@ jobs:
 
             echo "Building with NEXT_PUBLIC_API_URL=$API_URL"
 
+            # ── PERMISSIONS FIX ───────────────────────────────────────────────
+            # Ensure the docker user (uid 1001) can write to the storage volume.
+            # Standard Azure VMs often create host directories as root.
+            sudo chown -R 1001:1001 /opt/pdve/backend/storage || true
+
             # Rebuild and restart services.
             NEXT_PUBLIC_API_URL=$API_URL docker compose --env-file .env.production \
               up --build -d --remove-orphans
 
-            # Post-build prune to keep the disk lean
+            # ── DIAGNOSTICS ───────────────────────────────────────────────────
+            echo "--- Service Status ---"
+            docker compose ps
+            
+            echo "--- Backend API Logs (Last 20 lines) ---"
+            docker compose logs --tail 20 api
+            
+            # Clean up old images to save disk space
             docker image prune -f
 
             echo "Deploy complete!"
