@@ -53,20 +53,31 @@ jobs:
             echo "Building with NEXT_PUBLIC_API_URL=$API_URL"
 
             # ── PERMISSIONS FIX ───────────────────────────────────────────────
-            # Ensure the docker user (uid 1001) can write to the storage volume.
-            # Standard Azure VMs often create host directories as root.
             sudo chown -R 1001:1001 /opt/pdve/backend/storage || true
 
             # Rebuild and restart services.
             NEXT_PUBLIC_API_URL=$API_URL docker compose --env-file .env.production \
               up --build -d --remove-orphans
 
+            # ── FORCE NGINX RESTART ───────────────────────────────────────────
+            # Nginx often holds onto old container IPs (DNS caching). 
+            # Forcing a restart ensures it picks up the fresh API/Frontend containers.
+            echo "Restarting Nginx to refresh DNS..."
+            docker compose restart nginx
+
+            # Wait a few seconds for services to initialize before grabbing logs
+            echo "Waiting for services to start..."
+            sleep 10
+
             # ── DIAGNOSTICS ───────────────────────────────────────────────────
             echo "--- Service Status ---"
             docker compose ps
             
-            echo "--- Backend API Logs (Last 20 lines) ---"
-            docker compose logs --tail 20 api
+            echo "--- Backend API Logs ---"
+            docker compose logs --tail 50 api
+            
+            echo "--- Nginx Error Logs ---"
+            docker compose logs --tail 20 nginx
             
             # Clean up old images to save disk space
             docker image prune -f
