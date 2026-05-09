@@ -282,7 +282,13 @@ class FFmpegCommandBuilder:
                 and self.timeline.clips[i + 1].transition_in in XFADE_TRANSITION_TYPES
             )
             clip_dur = clip.effective_duration
-            if smooth > 0 and not next_is_crossfade and clip_dur > smooth * 2:
+            if next_is_crossfade:
+                next_clip = self.timeline.clips[i + 1]
+                d = min(next_clip.transition_duration, clip_dur * 0.5, next_clip.effective_duration * 0.5)
+                d = max(d, 0.1)
+                fade_start = round(clip_dur - d, 3)
+                a_chain += f",afade=t=out:st={fade_start}:d={d}"
+            elif smooth > 0 and clip_dur > smooth * 2:
                 fade_start = round(clip_dur - smooth, 3)
                 a_chain += f",afade=t=out:st={fade_start}:d={smooth}"
 
@@ -388,8 +394,10 @@ class FFmpegCommandBuilder:
 
         # Chain xfade between video streams
         current_v = v_labels[0]
-        current_a = a_labels[0]
         accumulated_dur = clips[0].effective_duration
+
+        # Audio mixing offsets
+        audio_mix_inputs = [(a_labels[0], 0.0)]
 
         for i in range(1, len(clips)):
             clip = clips[i]
@@ -403,37 +411,46 @@ class FFmpegCommandBuilder:
                 offset = round(accumulated_dur - d, 3)
 
                 xf_v = f"xfv{i}"
-                xf_a = f"xfa{i}"
 
                 filters.append(
                     f"[{current_v}][{v_labels[i]}]"
                     f"xfade=transition={xfade_kind}:duration={d}:offset={offset}"
                     f"[{xf_v}]"
                 )
-                # Audio always uses an acrossfade (an alpha-blend equivalent
-                # for audio), regardless of the visual transition style.
-                filters.append(
-                    f"[{current_a}][{a_labels[i]}]acrossfade=d={d}[{xf_a}]"
-                )
 
                 current_v = xf_v
-                current_a = xf_a
                 accumulated_dur = offset + clip.effective_duration
+                audio_mix_inputs.append((a_labels[i], offset))
             else:
-                # No crossfade — concat this pair
+                # No crossfade — concat this pair for video
                 pair_v = f"pv{i}"
-                pair_a = f"pa{i}"
                 filters.append(
-                    f"[{current_v}][{current_a}][{v_labels[i]}][{a_labels[i]}]"
-                    f"concat=n=2:v=1:a=1[{pair_v}][{pair_a}]"
+                    f"[{current_v}][{v_labels[i]}]"
+                    f"concat=n=2:v=1:a=0[{pair_v}]"
                 )
                 current_v = pair_v
-                current_a = pair_a
+                
+                offset = round(accumulated_dur, 3)
                 accumulated_dur += clip.effective_duration
+                audio_mix_inputs.append((a_labels[i], offset))
 
-        # Rename final labels
+        # Rename final video label
         filters.append(f"[{current_v}]null[outv]")
-        filters.append(f"[{current_a}]anull[outa]")
+
+        # Mix all audio tracks together using adelay + amix
+        mix_labels = []
+        for idx, (a_lbl, offset) in enumerate(audio_mix_inputs):
+            mix_lbl = f"amix_{idx}"
+            if offset > 0:
+                delay_ms = int(offset * 1000)
+                filters.append(f"[{a_lbl}]adelay={delay_ms}|{delay_ms}[{mix_lbl}]")
+            else:
+                filters.append(f"[{a_lbl}]anull[{mix_lbl}]")
+            mix_labels.append(mix_lbl)
+            
+        n_mix = len(mix_labels)
+        inputs_str = "".join(f"[{lbl}]" for lbl in mix_labels)
+        filters.append(f"{inputs_str}amix=inputs={n_mix}:duration=longest:normalize=0[outa]")
 
         # Mix in background music + voiceover if either is present.
         out_a = "outa"
