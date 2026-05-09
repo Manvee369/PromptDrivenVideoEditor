@@ -1,4 +1,4 @@
-# PromptDrivenVideoEditor — CPU VM Docker Compose
+﻿# PromptDrivenVideoEditor â€” CPU VM Docker Compose
 #
 # Usage on the Azure CPU VM:
 #   1. Copy .env.example to .env.production and fill in secrets
@@ -8,10 +8,10 @@
 # Architecture: single CPU VM running all services.
 # The worker runs on CPU but offloads ML to Azure Speech for speed.
 
-version: "3.9"
+
 
 services:
-  # ── Redis ─────────────────────────────────────────────────────────────────
+  # â”€â”€ Redis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
     volumes:
       - redis_data:/data
 
-  # ── FastAPI API (CPU only — just routes HTTP, no ML) ──────────────────────
+  # â”€â”€ FastAPI API (CPU only â€” just routes HTTP, no ML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   api:
     build:
       context: ./backend
@@ -52,7 +52,7 @@ services:
       timeout: 30s
       retries: 10
 
-  # ── RQ Worker (GPU — runs Whisper, SigLIP, face detection) ───────────────
+  # â”€â”€ RQ Worker (GPU â€” runs Whisper, SigLIP, face detection) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   worker:
     build:
       context: ./backend
@@ -81,7 +81,7 @@ services:
       PDVE_USE_WHISPERX_ALIGNMENT: "false"
       PDVE_VISUAL_SCORING_ENABLED: "true"
 
-  # ── Next.js Frontend ──────────────────────────────────────────────────────
+  # â”€â”€ Next.js Frontend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   frontend:
     build:
       context: ./frontend
@@ -94,7 +94,7 @@ services:
     ports:
       - "3000:3000"
 
-  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────
+  # â”€â”€ Nginx Reverse Proxy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   nginx:
     image: nginx:alpine
     restart: unless-stopped
@@ -112,3 +112,4 @@ volumes:
     driver: local
   redis_data:
     driver: local
+
